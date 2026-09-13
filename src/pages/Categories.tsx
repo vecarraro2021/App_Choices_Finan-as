@@ -22,6 +22,18 @@ import {
   Tag,
   DollarSign,
   Palette,
+  Home,
+  Heart,
+  Car,
+  Coffee,
+  BookOpen,
+  Layers,
+  FileText,
+  CreditCard,
+  Briefcase,
+  Gift,
+  PlusCircle,
+  TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -282,10 +294,24 @@ export default function CategoriesView() {
                         )}
                       </button>
 
-                      <span
-                        className="h-3 w-3 rounded-full shrink-0 shadow-2xs"
+                      <div
+                        className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0 shadow-2xs text-white"
                         style={{ backgroundColor: main.color || '#2563EB' }}
-                      />
+                      >
+                        {main.icon === 'Home' && <Home className="h-3.5 w-3.5" />}
+                        {main.icon === 'Heart' && <Heart className="h-3.5 w-3.5" />}
+                        {main.icon === 'Car' && <Car className="h-3.5 w-3.5" />}
+                        {main.icon === 'Coffee' && <Coffee className="h-3.5 w-3.5" />}
+                        {main.icon === 'BookOpen' && <BookOpen className="h-3.5 w-3.5" />}
+                        {main.icon === 'Layers' && <Layers className="h-3.5 w-3.5" />}
+                        {main.icon === 'FileText' && <FileText className="h-3.5 w-3.5" />}
+                        {main.icon === 'CreditCard' && <CreditCard className="h-3.5 w-3.5" />}
+                        {main.icon === 'Briefcase' && <Briefcase className="h-3.5 w-3.5" />}
+                        {main.icon === 'Gift' && <Gift className="h-3.5 w-3.5" />}
+                        {main.icon === 'PlusCircle' && <PlusCircle className="h-3.5 w-3.5" />}
+                        {main.icon === 'TrendingUp' && <TrendingUp className="h-3.5 w-3.5" />}
+                        {!main.icon && <Tag className="h-3.5 w-3.5" />}
+                      </div>
 
                       <span className="font-bold text-slate-900 text-sm truncate">{main.name}</span>
 

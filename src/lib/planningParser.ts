@@ -312,17 +312,45 @@ export function parsePlanningMarkdown(markdown: string): PlanningParsedData {
       })
     }
 
+    // Se a linha pertencer à seção EXTRAS mas for de investimentos, mapear para a seção/categoria INVESTIMENTOS
+    const INVESTMENT_SUBS = [
+      'investimentos',
+      'degiro',
+      'consorcio',
+      'consorcio',
+      'outrosinvestimentos',
+    ]
+    const cleanRowKey = normalizeCategoryName(rowName)
+    const isExtras = normalizeCategoryName(currentSection.name) === 'extras'
+    const isInvestSub = isExtras && INVESTMENT_SUBS.includes(cleanRowKey)
+
+    let targetSection = currentSection
+    if (isInvestSub) {
+      let investSec = sections.find((s) => normalizeCategoryName(s.name) === 'investimentos')
+      if (!investSec) {
+        investSec = { name: 'INVESTIMENTOS', items: [] }
+        // Inserir imediatamente antes ou após a seção EXTRAS
+        const extrasIdx = sections.findIndex((s) => normalizeCategoryName(s.name) === 'extras')
+        if (extrasIdx !== -1) {
+          sections.splice(extrasIdx + 1, 0, investSec)
+        } else {
+          sections.push(investSec)
+        }
+      }
+      targetSection = investSec
+    }
+
     itemCounter++
     const item: PlanningItem = {
       id: `item-${itemCounter}`,
-      sectionName: currentSection.name,
+      sectionName: targetSection.name,
       name: rowName,
       subgroup: subgroup || undefined,
       estimated: estimatedVal,
       monthlyValues,
     }
 
-    currentSection.items.push(item)
+    targetSection.items.push(item)
   }
 
   // Calculate stats

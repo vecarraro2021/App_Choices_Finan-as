@@ -206,7 +206,7 @@ const KEYWORD_MAP: Record<string, string[]> = {
   // Serviços
   contabilidade: ['contabilizei', 'contabilidade', 'contador', 'honorarios'],
 
-  // Extras
+  // Investimentos
   investimentos: [
     'b3',
     'xp ',
@@ -217,7 +217,18 @@ const KEYWORD_MAP: Record<string, string[]> = {
     'tesouro direto',
     'cripto',
     'binance',
+    'investimento',
+    'renda fixa',
+    'cdb',
+    'lci',
+    'lca',
+    'fundos',
   ],
+  degiro: ['degiro', 'flatex', 'corretora eur', 'bolsa europeia'],
+  consorcio: ['consorcio', 'consorcio porto', 'consorcio bb', 'consorcio caixa'],
+  'outros investimentos': ['previdencia', 'vgbl', 'pgbl', 'acoes', 'fii', 'etf'],
+
+  // Extras
   'material de obra': ['leroy merlin', 'c&c', 'telhanorte', 'material de construcao', 'tintas'],
   'serviço de obra': ['marceneiro', 'pedreiro', 'eletricista', 'pintor', 'reforma'],
 }

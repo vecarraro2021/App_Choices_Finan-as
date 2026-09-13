@@ -378,18 +378,31 @@ export async function importPlanningData(params: {
       }
     })
 
+  // Subcategorias conhecidas de Investimentos
+  const INVESTMENT_SUBCATEGORY_NAMES = [
+    'investimentos',
+    'degiro',
+    'consorcio',
+    'outrosinvestimentos',
+  ]
+
   // Process all sections
   for (const section of params.sections) {
-    const secNorm = norm(section.name)
+    let effectiveSectionName = section.name
+    let secNorm = norm(effectiveSectionName)
     let mainCat = mainMap.get(secNorm)
 
     if (!mainCat) {
-      // Create main category
-      const color = defaultColors[mainMap.size % defaultColors.length]
+      // Create main category with standard styling
+      const isInvestMain = secNorm === 'investimentos'
+      const color = isInvestMain ? '#059669' : defaultColors[mainMap.size % defaultColors.length]
+      const icon = isInvestMain ? 'TrendingUp' : undefined
+
       mainCat = await createCategory({
-        name: section.name,
+        name: isInvestMain ? 'Investimentos' : section.name,
         type: 'main',
         color,
+        icon,
         estimated: 0,
       })
       mainMap.set(secNorm, mainCat)
@@ -399,7 +412,28 @@ export async function importPlanningData(params: {
     // Process each subcategory in section
     for (const item of section.items) {
       const itemNorm = norm(item.name)
-      const subKey = `${secNorm}::${itemNorm}`
+      // Se a subcategoria for de investimentos, garantir que a categoria mãe seja Investimentos
+      let targetMainCat = mainCat
+      let effectiveSecNorm = secNorm
+
+      if (INVESTMENT_SUBCATEGORY_NAMES.includes(itemNorm)) {
+        let investMain = mainMap.get('investimentos')
+        if (!investMain) {
+          investMain = await createCategory({
+            name: 'Investimentos',
+            type: 'main',
+            color: '#059669',
+            icon: 'TrendingUp',
+            estimated: 0,
+          })
+          mainMap.set('investimentos', investMain)
+          mainCategoriesCreated++
+        }
+        targetMainCat = investMain
+        effectiveSecNorm = 'investimentos'
+      }
+
+      const subKey = `${effectiveSecNorm}::${itemNorm}`
       let subCat = subMap.get(subKey) || subMap.get(`none::${itemNorm}`)
 
       if (!subCat) {
@@ -407,8 +441,9 @@ export async function importPlanningData(params: {
         subCat = await createCategory({
           name: item.name,
           type: 'sub',
-          parent: mainCat.id,
+          parent: targetMainCat.id,
           estimated: item.estimated || 0,
+          color: targetMainCat.color,
         })
         subMap.set(subKey, subCat)
         subCategoriesCreated++
@@ -422,9 +457,12 @@ export async function importPlanningData(params: {
           needsUpdate = true
         }
 
-        // Ensure parent is linked correctly if it wasn't
-        if (!subCat.parent || subCat.parent !== mainCat.id) {
-          updateData.parent = mainCat.id
+        // Ensure parent is linked correctly to the appropriate main category
+        if (!subCat.parent || subCat.parent !== targetMainCat.id) {
+          updateData.parent = targetMainCat.id
+          if (targetMainCat.color) {
+            updateData.color = targetMainCat.color
+          }
           needsUpdate = true
         }
 
@@ -473,7 +511,12 @@ export async function importPlanningData(params: {
     const secNorm = norm(section.name)
     for (const item of section.items) {
       const itemNorm = norm(item.name)
-      const subCat = subMap.get(`${secNorm}::${itemNorm}`) || subMap.get(`none::${itemNorm}`)
+      const isInvest = INVESTMENT_SUBCATEGORY_NAMES.includes(itemNorm)
+      const effectiveSec = isInvest ? 'investimentos' : secNorm
+      const subCat =
+        subMap.get(`${effectiveSec}::${itemNorm}`) ||
+        subMap.get(`${secNorm}::${itemNorm}`) ||
+        subMap.get(`none::${itemNorm}`)
 
       Object.entries(item.monthlyValues).forEach(([mIdxStr, val]) => {
         const mIdx = parseInt(mIdxStr, 10)
