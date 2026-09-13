@@ -437,14 +437,28 @@ export async function importPlanningData(params: {
   // 1. Fetch current categories
   const currentCategories = await getCategories()
 
-  // Helper to normalize names
-  const norm = (s: string) =>
-    s
+  // Helper to normalize and sanitize names
+  const sanitize = (text: string) => {
+    if (!text) return ''
+    return text
+      .replace(/\\([[\]()|*_`\\~])/g, '$1')
+      .replace(/\\+$/, '')
+      .replace(/\.{3,}$/, '')
       .trim()
+  }
+  const norm = (s: string) => {
+    const clean = sanitize(s)
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]/g, '')
+
+    // Harmonizar variações de gênero / número comuns
+    if (clean === 'tarifasfinanceiros' || clean === 'tarifasfinanceiras') {
+      return 'tarifasfinanceiras'
+    }
+    return clean
+  }
 
   let mainCategoriesCreated = 0
   let subCategoriesCreated = 0
@@ -473,14 +487,21 @@ export async function importPlanningData(params: {
       mainMap.set(norm(c.name), c)
     })
 
-  // Map of subcategories: key `${parentNorm}::${subNorm}` -> Category
+  // Map of subcategories:
+  // key `${parentNorm}::${subNorm}` -> Category
+  // and map of subcategory by its normalized name to avoid duplicate creation or unwanted re-parenting
   const subMap = new Map<string, Category>()
+  const subByNameMap = new Map<string, Category>()
+
   currentCategories
     .filter((c) => c.type === 'sub')
     .forEach((c) => {
       const parent = currentCategories.find((p) => p.id === c.parent)
       const parentKey = parent ? norm(parent.name) : 'none'
       subMap.set(`${parentKey}::${norm(c.name)}`, c)
+      if (!subByNameMap.has(norm(c.name))) {
+        subByNameMap.set(norm(c.name), c)
+      }
       // Also map bare sub name for fallback
       if (!subMap.has(`none::${norm(c.name)}`)) {
         subMap.set(`none::${norm(c.name)}`, c)
@@ -497,9 +518,14 @@ export async function importPlanningData(params: {
 
   // Process all sections
   for (const section of params.sections) {
-    let effectiveSectionName = section.name
-    let secNorm = norm(effectiveSectionName)
+    let cleanSectionName = sanitize(section.name)
+    let secNorm = norm(cleanSectionName)
     let mainCat = mainMap.get(secNorm)
+
+    // Se o nome da seção parecer ser Tarifas Financeiras, apontar para ela
+    if (!mainCat && (secNorm === 'tarifasfinanceiros' || secNorm === 'tarifasfinanceiras')) {
+      mainCat = mainMap.get('tarifasfinanceiras')
+    }
 
     if (!mainCat) {
       // Create main category with standard styling
@@ -508,7 +534,7 @@ export async function importPlanningData(params: {
       const icon = isInvestMain ? 'TrendingUp' : undefined
 
       mainCat = await createCategory({
-        name: isInvestMain ? 'Investimentos' : section.name,
+        name: isInvestMain ? 'Investimentos' : cleanSectionName,
         type: 'main',
         color,
         icon,
@@ -520,7 +546,9 @@ export async function importPlanningData(params: {
 
     // Process each subcategory in section
     for (const item of section.items) {
-      const itemNorm = norm(item.name)
+      const cleanItemName = sanitize(item.name)
+      const itemNorm = norm(cleanItemName)
+
       // Se a subcategoria for de investimentos, garantir que a categoria mãe seja Investimentos
       let targetMainCat = mainCat
       let effectiveSecNorm = secNorm
@@ -543,31 +571,43 @@ export async function importPlanningData(params: {
       }
 
       const subKey = `${effectiveSecNorm}::${itemNorm}`
-      let subCat = subMap.get(subKey) || subMap.get(`none::${itemNorm}`)
+      // Priorizar a busca exata (seção::sub) ou qualquer sub existente por nome (para não re-parentar)
+      let subCat =
+        subMap.get(subKey) || subByNameMap.get(itemNorm) || subMap.get(`none::${itemNorm}`)
 
       if (!subCat) {
         // Create subcategory
         subCat = await createCategory({
-          name: item.name,
+          name: cleanItemName,
           type: 'sub',
           parent: targetMainCat.id,
           estimated: item.estimated || 0,
           color: targetMainCat.color,
         })
         subMap.set(subKey, subCat)
+        subByNameMap.set(itemNorm, subCat)
         subCategoriesCreated++
       } else {
-        // Update estimated if provided (> 0)
+        // Subcategoria já existe!
         let needsUpdate = false
         const updateData: Partial<Category> = {}
 
+        // Atualizar nome se contiver caracteres de escape ou sujeira
+        if (subCat.name !== cleanItemName && cleanItemName.length > 0) {
+          updateData.name = cleanItemName
+          needsUpdate = true
+        }
+
+        // Update estimated if provided (> 0)
         if (item.estimated > 0 && subCat.estimated !== item.estimated) {
           updateData.estimated = item.estimated
           needsUpdate = true
         }
 
-        // Ensure parent is linked correctly to the appropriate main category
-        if (!subCat.parent || subCat.parent !== targetMainCat.id) {
+        // Regra de re-parent: NUNCA quebrar nem mover subcategoria existente que já possua um pai válido!
+        // Apenas vincular parent se a subcategoria estiver sem parent (órfã).
+        // Isso preserva a organização manual (drag & drop) feita pelo usuário.
+        if (!subCat.parent) {
           updateData.parent = targetMainCat.id
           if (targetMainCat.color) {
             updateData.color = targetMainCat.color
@@ -577,6 +617,9 @@ export async function importPlanningData(params: {
 
         if (needsUpdate) {
           subCat = await updateCategory(subCat.id, updateData)
+          // Atualizar mapas
+          subMap.set(subKey, subCat)
+          subByNameMap.set(itemNorm, subCat)
           categoriesUpdated++
         }
       }
@@ -617,14 +660,17 @@ export async function importPlanningData(params: {
   }> = []
 
   for (const section of params.sections) {
-    const secNorm = norm(section.name)
+    const cleanSection = sanitize(section.name)
+    const secNorm = norm(cleanSection)
     for (const item of section.items) {
-      const itemNorm = norm(item.name)
+      const cleanItem = sanitize(item.name)
+      const itemNorm = norm(cleanItem)
       const isInvest = INVESTMENT_SUBCATEGORY_NAMES.includes(itemNorm)
       const effectiveSec = isInvest ? 'investimentos' : secNorm
       const subCat =
         subMap.get(`${effectiveSec}::${itemNorm}`) ||
         subMap.get(`${secNorm}::${itemNorm}`) ||
+        subByNameMap.get(itemNorm) ||
         subMap.get(`none::${itemNorm}`)
 
       Object.entries(item.monthlyValues).forEach(([mIdxStr, val]) => {
@@ -635,7 +681,7 @@ export async function importPlanningData(params: {
 
           toInsert.push({
             date: dateStr,
-            description: `${item.name} (importado da planilha)`,
+            description: `${cleanItem} (importado da planilha)`,
             amount: val, // Saved in EUR (app currency)
             category: subCat?.id,
             source: 'importado',

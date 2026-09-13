@@ -56,13 +56,36 @@ const MONTH_MAP: Record<string, number> = {
 /**
  * Normalizes text removing accents and converting to lower case for comparison.
  */
+export function sanitizeCategoryText(text: string): string {
+  if (!text) return ''
+  return (
+    text
+      // Remove markdown backslash escapes: \[ -> [, \] -> ], \| -> |, etc.
+      .replace(/\\([[\]()|*_`\\~])/g, '$1')
+      // Remove trailing dangling backslashes
+      .replace(/\\+$/, '')
+      // Remove trailing ellipsis literal artifacts if present (e.g. "FOO...")
+      .replace(/\.{3,}$/, '')
+      .trim()
+  )
+}
+
+/**
+ * Normalizes text removing accents, punctuation and converting to lower case for comparison.
+ * Handles singular/plural variations such as "tarifas financeiras" vs "tarifas financeiros".
+ */
 export function normalizeCategoryName(name: string): string {
-  return name
-    .trim()
+  const clean = sanitizeCategoryText(name)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '')
+
+  // Normalização específica para harmonizar variações comuns de gênero/número
+  if (clean === 'tarifasfinanceiros' || clean === 'tarifasfinanceiras') {
+    return 'tarifasfinanceiras'
+  }
+  return clean
 }
 
 /**
@@ -181,18 +204,18 @@ export function parsePlanningMarkdown(markdown: string): PlanningParsedData {
     }
 
     // The line identifier in col 0 (or col 1 if col 0 has duplicated planeamento)
-    let rowName = cells[colNameIdx] || ''
+    let rawRowName = cells[colNameIdx] || ''
     // Sometimes markdown parser outputs duplicated column like "Aluguel | Aluguel | Moradia | 2500..."
-    if (!rowName && cells.length > 1) {
-      rowName = cells[1]
+    if (!rawRowName && cells.length > 1) {
+      rawRowName = cells[1]
     }
-
-    rowName = rowName.trim()
 
     // Clean any leading label artifact like "PLANEJAMENTO FINANCEIRO: "
-    if (rowName.toLowerCase().startsWith('planejamento financeiro:')) {
-      rowName = rowName.slice('planejamento financeiro:'.length).trim()
+    if (rawRowName.toLowerCase().startsWith('planejamento financeiro:')) {
+      rawRowName = rawRowName.slice('planejamento financeiro:'.length).trim()
     }
+
+    let rowName = sanitizeCategoryText(rawRowName)
 
     // Ignore empty lines or subtotal rows (empty name)
     if (!rowName) {
@@ -231,8 +254,11 @@ export function parsePlanningMarkdown(markdown: string): PlanningParsedData {
         isNaN(parseAmount(cells[colEstimatedIdx])))
 
     if (isSectionHeader) {
-      const sectionClean = rowName.trim()
-      let sec = sections.find((s) => s.name.toUpperCase() === sectionClean)
+      const sectionClean = sanitizeCategoryText(rowName)
+      // Check if section already exists (case and accent insensitive)
+      let sec = sections.find(
+        (s) => normalizeCategoryName(s.name) === normalizeCategoryName(sectionClean),
+      )
       if (!sec) {
         sec = { name: sectionClean, items: [] }
         sections.push(sec)
@@ -251,10 +277,11 @@ export function parsePlanningMarkdown(markdown: string): PlanningParsedData {
     // Extract Subgroup/Column C
     let subgroup = ''
     if (cells[colSubgroupIdx]) {
-      subgroup = cells[colSubgroupIdx].trim()
-      if (subgroup.toLowerCase().startsWith('column_3:')) {
-        subgroup = subgroup.slice('column_3:'.length).trim()
+      let rawSub = cells[colSubgroupIdx].trim()
+      if (rawSub.toLowerCase().startsWith('column_3:')) {
+        rawSub = rawSub.slice('column_3:'.length).trim()
       }
+      subgroup = sanitizeCategoryText(rawSub)
     }
 
     // Extract Estimated / Column D
