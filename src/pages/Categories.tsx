@@ -36,6 +36,9 @@ import {
   PlusCircle,
   TrendingUp,
   ArrowLeftRight,
+  GripVertical,
+  CornerDownRight,
+  MoveRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -88,6 +91,17 @@ export default function CategoriesView() {
   const [deletingCat, setDeletingCat] = useState<Category | null>(null)
   const [reassignTo, setReassignTo] = useState<string>('none')
   const [deleting, setDeleting] = useState(false)
+
+  // Move subcategory modal (Mobile / Accessibility / Menu)
+  const [movingSubCategory, setMovingSubCategory] = useState<Category | null>(null)
+  const [targetParentId, setTargetParentId] = useState<string>('')
+  const [moving, setMoving] = useState(false)
+
+  // Drag & drop state
+  const [draggedSubId, setDraggedSubId] = useState<string | null>(null)
+  const [dragOverMainId, setDragOverMainId] = useState<string | null>(null)
+  const [dragOverSubId, setDragOverSubId] = useState<string | null>(null)
+  const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null)
 
   const loadData = async () => {
     try {
@@ -190,6 +204,226 @@ export default function CategoriesView() {
     }
   }
 
+  // Move subcategory function (used by both Drag & Drop and Move Dialog)
+  const handleMoveSubCategory = async (subCatId: string, newParentId: string) => {
+    const subToMove = categories.find((c) => c.id === subCatId)
+    if (!subToMove || subToMove.parent === newParentId) {
+      return
+    }
+
+    const targetParent = categories.find((c) => c.id === newParentId && c.type === 'main')
+    if (!targetParent) {
+      toast({ title: 'Categoria de destino inválida', variant: 'destructive' })
+      return
+    }
+
+    // Optimistic UI update
+    const previousCategories = [...categories]
+    setCategories((prev) =>
+      prev.map((c) =>
+        c.id === subCatId ? { ...c, parent: newParentId, color: targetParent.color || c.color } : c,
+      ),
+    )
+
+    // Automatically expand target parent so user sees the moved item immediately
+    setCollapsed((prev) => ({ ...prev, [newParentId]: false }))
+
+    try {
+      await updateCategory(subCatId, {
+        parent: newParentId,
+        color: targetParent.color || undefined,
+      })
+
+      toast({
+        title: `Subcategoria movida!`,
+        description: `"${subToMove.name}" agora pertence a "${targetParent.name}".`,
+      })
+    } catch (err) {
+      console.error('Erro ao mover subcategoria:', err)
+      // Rollback optimistic update
+      setCategories(previousCategories)
+      toast({
+        title: 'Erro ao mover subcategoria',
+        description: 'Não foi possível atualizar no servidor.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Open Move Dialog (Modal / Mobile / Accessibility)
+  const handleOpenMove = (sub: Category) => {
+    setMovingSubCategory(sub)
+    // Find first other main category as default
+    const currentParentId = sub.parent
+    const otherMain = mainCategories.find((m) => m.id !== currentParentId)
+    setTargetParentId(otherMain ? otherMain.id : '')
+  }
+
+  const handleConfirmMove = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!movingSubCategory || !targetParentId) return
+
+    setMoving(true)
+    try {
+      await handleMoveSubCategory(movingSubCategory.id, targetParentId)
+      setMovingSubCategory(null)
+    } finally {
+      setMoving(false)
+    }
+  }
+
+  // Reorder or move subcategory relative to another subcategory
+  const handleReorderSubCategory = async (
+    sourceSubId: string,
+    targetSubId: string,
+    position: 'above' | 'below',
+  ) => {
+    if (sourceSubId === targetSubId) return
+
+    const source = categories.find((c) => c.id === sourceSubId)
+    const target = categories.find((c) => c.id === targetSubId)
+    if (!source || !target || !target.parent) return
+
+    const targetParent = categories.find((c) => c.id === target.parent && c.type === 'main')
+    const needsParentChange = source.parent !== target.parent
+
+    // Reorder in local state
+    const previousCategories = [...categories]
+    setCategories((prev) => {
+      // Remove source from current position
+      const withoutSource = prev.filter((c) => c.id !== sourceSubId)
+      // Updated source item
+      const updatedSource: Category = {
+        ...source,
+        parent: target.parent,
+        color: targetParent?.color || source.color,
+      }
+
+      const targetIndex = withoutSource.findIndex((c) => c.id === targetSubId)
+      if (targetIndex === -1) return prev
+
+      const insertIndex = position === 'above' ? targetIndex : targetIndex + 1
+      const nextList = [...withoutSource]
+      nextList.splice(insertIndex, 0, updatedSource)
+      return nextList
+    })
+
+    // If target parent was different, update in backend
+    if (needsParentChange) {
+      try {
+        await updateCategory(sourceSubId, {
+          parent: target.parent,
+          color: targetParent?.color || undefined,
+        })
+        toast({
+          title: 'Subcategoria movida!',
+          description: targetParent
+            ? `"${source.name}" agora pertence a "${targetParent.name}".`
+            : undefined,
+        })
+      } catch (err) {
+        console.error('Erro ao reordenar subcategoria:', err)
+        setCategories(previousCategories)
+        toast({
+          title: 'Erro ao mover subcategoria',
+          variant: 'destructive',
+        })
+      }
+    }
+  }
+
+  // Drag and Drop handlers
+  const handleDragStart = (e: React.DragEvent, sub: Category) => {
+    e.dataTransfer.setData('text/plain', sub.id)
+    e.dataTransfer.setData('application/json', JSON.stringify({ id: sub.id, parent: sub.parent }))
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedSubId(sub.id)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedSubId(null)
+    setDragOverMainId(null)
+    setDragOverSubId(null)
+    setDropPosition(null)
+  }
+
+  const handleDragOverMain = (e: React.DragEvent, mainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverMainId !== mainId) {
+      setDragOverMainId(mainId)
+    }
+  }
+
+  const handleDragLeaveMain = (e: React.DragEvent, mainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only clear if actually leaving the card
+    if (e.currentTarget.contains(e.relatedTarget as Node)) {
+      return
+    }
+    if (dragOverMainId === mainId) {
+      setDragOverMainId(null)
+    }
+  }
+
+  const handleDropOnMain = async (e: React.DragEvent, targetMainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverMainId(null)
+    setDragOverSubId(null)
+    setDropPosition(null)
+
+    const subId = e.dataTransfer.getData('text/plain') || draggedSubId
+    setDraggedSubId(null)
+
+    if (!subId) return
+    await handleMoveSubCategory(subId, targetMainId)
+  }
+
+  const handleDragOverSub = (e: React.DragEvent, sub: Category) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+
+    // Don't show drop indicator on self
+    if (draggedSubId === sub.id) return
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const midY = rect.top + rect.height / 2
+    const pos = e.clientY < midY ? 'above' : 'below'
+
+    if (dragOverSubId !== sub.id || dropPosition !== pos) {
+      setDragOverSubId(sub.id)
+      setDropPosition(pos)
+    }
+  }
+
+  const handleDragLeaveSub = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setDragOverSubId(null)
+    setDropPosition(null)
+  }
+
+  const handleDropOnSub = async (e: React.DragEvent, targetSub: Category) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const sourceSubId = e.dataTransfer.getData('text/plain') || draggedSubId
+    const pos = dropPosition || 'below'
+
+    setDragOverMainId(null)
+    setDragOverSubId(null)
+    setDropPosition(null)
+    setDraggedSubId(null)
+
+    if (!sourceSubId || sourceSubId === targetSub.id) return
+    await handleReorderSubCategory(sourceSubId, targetSub.id, pos)
+  }
+
   // Open Delete dialog
   const handleOpenDelete = (cat: Category) => {
     setDeletingCat(cat)
@@ -288,18 +522,37 @@ export default function CategoriesView() {
               const subs = getSubcategories(main.id)
               const isCollapsed = !!collapsed[main.id]
 
+              const isDropTarget = dragOverMainId === main.id
+              const isCurrentParentOfDragged =
+                draggedSubId && subs.some((s) => s.id === draggedSubId)
+
               return (
                 <div
                   key={main.id}
-                  className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs"
+                  onDragOver={(e) => handleDragOverMain(e, main.id)}
+                  onDragLeave={(e) => handleDragLeaveMain(e, main.id)}
+                  onDrop={(e) => handleDropOnMain(e, main.id)}
+                  className={`rounded-xl border transition-all duration-150 overflow-hidden shadow-2xs ${
+                    isDropTarget
+                      ? 'border-blue-500 ring-2 ring-blue-400/50 bg-blue-50/30'
+                      : 'border-slate-200 bg-white'
+                  }`}
                 >
                   {/* Main Category Row */}
-                  <div className="flex items-center justify-between p-3.5 bg-slate-50/70 hover:bg-slate-100/60 transition-colors">
+                  <div
+                    className={`flex items-center justify-between p-3.5 transition-colors ${
+                      isDropTarget ? 'bg-blue-100/60' : 'bg-slate-50/70 hover:bg-slate-100/60'
+                    }`}
+                  >
                     <div
                       className="flex items-center gap-2.5 cursor-pointer select-none min-w-0"
                       onClick={() => toggleCollapse(main.id)}
                     >
-                      <button className="text-slate-400 hover:text-slate-600">
+                      <button
+                        type="button"
+                        aria-label={isCollapsed ? 'Expandir categoria' : 'Recolher categoria'}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
                         {isCollapsed ? (
                           <ChevronRight className="h-4 w-4" />
                         ) : (
@@ -330,10 +583,20 @@ export default function CategoriesView() {
 
                       <Badge
                         variant="secondary"
-                        className="text-[10px] bg-slate-200/70 text-slate-700"
+                        className={`text-[10px] transition-colors ${
+                          isDropTarget
+                            ? 'bg-blue-200 text-blue-900 font-bold'
+                            : 'bg-slate-200/70 text-slate-700'
+                        }`}
                       >
-                        {subs.length} subitens
+                        {subs.length} {subs.length === 1 ? 'subitem' : 'subitens'}
                       </Badge>
+
+                      {isDropTarget && !isCurrentParentOfDragged && (
+                        <span className="text-[11px] font-medium text-blue-700 bg-blue-100/90 px-2 py-0.5 rounded-md hidden sm:inline-flex items-center gap-1 animate-pulse">
+                          <CornerDownRight className="h-3 w-3" /> Solte aqui para mover
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -382,50 +645,105 @@ export default function CategoriesView() {
                   {!isCollapsed && (
                     <div className="divide-y divide-slate-100 bg-white">
                       {subs.length === 0 ? (
-                        <div className="py-2.5 px-10 text-xs text-slate-400 italic">
-                          Nenhuma subcategoria vinculada.
+                        <div className="py-4 px-10 text-xs text-slate-400 italic flex items-center justify-between">
+                          <span>Nenhuma subcategoria vinculada.</span>
+                          <span className="text-[11px] text-slate-400 not-italic hidden sm:inline">
+                            Arraste subitens de outras categorias para cá
+                          </span>
                         </div>
                       ) : (
-                        subs.map((sub) => (
-                          <div
-                            key={sub.id}
-                            className="flex items-center justify-between py-2 px-10 hover:bg-slate-50/50 transition-colors text-xs"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-slate-300">↳</span>
-                              <span className="font-medium text-slate-700">{sub.name}</span>
-                            </div>
+                        subs.map((sub) => {
+                          const isThisBeingDragged = draggedSubId === sub.id
+                          const isTargetOfDrop = dragOverSubId === sub.id && !isThisBeingDragged
 
-                            <div className="flex items-center gap-4">
-                              {sub.estimated && sub.estimated > 0 ? (
-                                <span className="tabular-nums text-slate-500">
-                                  {formatCurrency(sub.estimated, currency)}
-                                </span>
-                              ) : (
-                                <span className="text-[11px] text-slate-400">—</span>
+                          return (
+                            <div
+                              key={sub.id}
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, sub)}
+                              onDragEnd={handleDragEnd}
+                              onDragOver={(e) => handleDragOverSub(e, sub)}
+                              onDragLeave={handleDragLeaveSub}
+                              onDrop={(e) => handleDropOnSub(e, sub)}
+                              className={`group/sub relative flex items-center justify-between py-2 px-6 sm:px-8 transition-all text-xs cursor-grab active:cursor-grabbing ${
+                                isThisBeingDragged
+                                  ? 'opacity-40 bg-blue-50/70 border border-dashed border-blue-400'
+                                  : 'hover:bg-slate-50/70'
+                              }`}
+                              title="Arraste para mover para outra categoria"
+                            >
+                              {/* Line drop indicators */}
+                              {isTargetOfDrop && dropPosition === 'above' && (
+                                <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-500 z-10 pointer-events-none" />
+                              )}
+                              {isTargetOfDrop && dropPosition === 'below' && (
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 z-10 pointer-events-none" />
                               )}
 
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-slate-400 hover:text-blue-600"
-                                  onClick={() => handleOpenEdit(sub)}
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div
+                                  className="text-slate-300 group-hover/sub:text-slate-500 cursor-grab active:cursor-grabbing shrink-0 transition-colors"
+                                  title="Clique e arraste para mover"
                                 >
-                                  <Edit2 className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-slate-400 hover:text-red-600"
-                                  onClick={() => handleOpenDelete(sub)}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                                  <GripVertical className="h-3.5 w-3.5" />
+                                </div>
+                                <span className="text-slate-300 shrink-0">↳</span>
+                                <span className="font-medium text-slate-700 truncate">
+                                  {sub.name}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-3 shrink-0">
+                                {sub.estimated && sub.estimated > 0 ? (
+                                  <span className="tabular-nums text-slate-500">
+                                    {formatCurrency(sub.estimated, currency)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">—</span>
+                                )}
+
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-slate-400 hover:text-blue-600"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenMove(sub)
+                                    }}
+                                    title="Mover para outra categoria..."
+                                  >
+                                    <MoveRight className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-slate-400 hover:text-blue-600"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenEdit(sub)
+                                    }}
+                                    title="Editar subcategoria"
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-slate-400 hover:text-red-600"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenDelete(sub)
+                                    }}
+                                    title="Excluir subcategoria"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))
+                          )
+                        })
                       )}
                     </div>
                   )}
@@ -631,6 +949,53 @@ export default function CategoriesView() {
               {deleting ? 'Excluindo...' : 'Confirmar Exclusão'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MOVE SUBCATEGORY MODAL (Mobile / Accessible Alternative) */}
+      <Dialog
+        open={!!movingSubCategory}
+        onOpenChange={(open) => !open && setMovingSubCategory(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MoveRight className="h-5 w-5 text-blue-600" />
+              Mover Subcategoria
+            </DialogTitle>
+            <DialogDescription>
+              Altere a categoria mãe de <strong>{movingSubCategory?.name}</strong> para reorganizar
+              a árvore.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmMove} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Nova Categoria Principal</Label>
+              <CategorySelectCombobox
+                categories={mainCategories}
+                value={targetParentId}
+                onChange={setTargetParentId}
+                excludeCategoryId={movingSubCategory?.parent}
+                placeholder="Selecione a categoria principal de destino"
+                searchPlaceholder="Buscar categoria principal..."
+                emptyText="Nenhuma categoria encontrada."
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setMovingSubCategory(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={moving || !targetParentId || targetParentId === movingSubCategory?.parent}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {moving ? 'Movendo...' : 'Mover Subcategoria'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
