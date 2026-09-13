@@ -15,7 +15,6 @@ import {
   X,
   Wallet,
   ArrowLeftRight,
-  Bot,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -36,7 +35,6 @@ const navItems = [
   { path: '/categorias', label: 'Categorias', icon: FolderTree },
   { path: '/cambio', label: 'Câmbio Mensal', icon: ArrowLeftRight },
   { path: '/alertas', label: 'Alertas & Insights', icon: AlertTriangle },
-  { path: '/assistente', label: 'Assistente de IA', icon: Bot },
 ]
 
 export default function Layout() {

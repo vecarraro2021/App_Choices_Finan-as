@@ -19,12 +19,6 @@ import { extractTextFromPDF } from '@/lib/pdfExtractor'
 import { parsePDFStatement, PDFParsedTransaction } from '@/lib/pdfStatementParser'
 import { useToast } from '@/hooks/use-toast'
 import {
-  categorizeTransactionsWithAI,
-  learnCategoryRule,
-  CategorySuggestion,
-} from '@/services/aiService'
-import AssistantChatPanel from '@/components/AssistantChatPanel'
-import {
   UploadCloud,
   FileSpreadsheet,
   FileText,
@@ -40,10 +34,6 @@ import {
   ArrowRight,
   Sparkles,
   Loader2,
-  Bot,
-  HelpCircle,
-  Zap,
-  BookmarkCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -80,12 +70,6 @@ interface PreviewTransaction {
   category?: string
   month: string
   selected?: boolean
-  // Assistência de IA e confiança
-  confidence?: 'alta' | 'provavel' | 'possivel' | 'baixa'
-  needsHelp?: boolean
-  suggestions?: CategorySuggestion[]
-  aiProcessed?: boolean
-  learnedPattern?: boolean
 }
 
 export default function TransactionsView() {
@@ -125,7 +109,6 @@ export default function TransactionsView() {
   const [previewList, setPreviewList] = useState<PreviewTransaction[]>([])
   const [showPreviewDialog, setShowPreviewDialog] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [isProcessingAi, setIsProcessingAi] = useState(false)
 
   // Manual entry state
   const [showManualDialog, setShowManualDialog] = useState(false)
@@ -244,7 +227,7 @@ export default function TransactionsView() {
       })
 
       // Converter transações detectadas para o modelo PreviewTransaction
-      // Aplicando conversão cambial se moeda for EUR e categorização com avaliação de confiança
+      // Aplicando conversão cambial se moeda for EUR e categorização automática por palavras-chave
       const preview: PreviewTransaction[] = parseResult.transactions.map((tx, idx) => {
         const matchResult = evaluateCategoryMatch(tx.description, categories)
         const rateUsed = getRateForMonth(tx.month, exchangeRates)
@@ -254,9 +237,7 @@ export default function TransactionsView() {
           amountBrl = Math.round(tx.amount * rateUsed * 100) / 100
         }
 
-        const isConfident = matchResult.confidence === 'alta' || matchResult.confidence === 'media'
         const initialCategory = matchResult.categoryId || undefined
-        const needsHelp = !isConfident
 
         return {
           id: `pdf-preview-${idx}`,
@@ -268,26 +249,11 @@ export default function TransactionsView() {
           category: initialCategory,
           month: tx.month,
           selected: true,
-          confidence:
-            matchResult.confidence === 'alta'
-              ? 'alta'
-              : matchResult.confidence === 'media'
-                ? 'provavel'
-                : 'baixa',
-          needsHelp,
-          suggestions: [],
-          aiProcessed: false,
         }
       })
 
       setPreviewList(preview)
       setShowPreviewDialog(true)
-
-      // Se houver transações que precisam de ajuda da IA, disparar categorização assistida em lote automaticamente
-      const itemsNeedingAi = preview.filter((p) => p.needsHelp || !p.category)
-      if (itemsNeedingAi.length > 0) {
-        runAiBatchCategorization(preview, itemsNeedingAi)
-      }
 
       toast({
         title: 'Extrato PDF processado!',
@@ -386,85 +352,7 @@ export default function TransactionsView() {
     }
   }
 
-  // Categorização assistida por IA em lote para lançamentos sem categoria ou com baixa confiança
-  const runAiBatchCategorization = async (
-    allRows: PreviewTransaction[],
-    targetItems?: PreviewTransaction[],
-  ) => {
-    const toProcess = targetItems || allRows.filter((it) => !it.category || it.needsHelp)
-    if (toProcess.length === 0) {
-      toast({
-        title: 'Tudo classificado!',
-        description:
-          'Todos os lançamentos do preview já possuem uma categoria atribuída com confiança.',
-      })
-      return
-    }
-
-    try {
-      setIsProcessingAi(true)
-      toast({
-        title: 'Consultando Assistente de IA...',
-        description: `Analisando ${toProcess.length} lançamento(s) contra a árvore de categorias.`,
-      })
-
-      const payload = toProcess.map((item) => ({
-        id: item.id,
-        description: item.description,
-        amount: item.amount,
-      }))
-
-      const response = await categorizeTransactionsWithAI(payload)
-
-      // Mesclar resultados no previewList
-      const resultMap = new Map(response.results.map((r) => [r.id, r]))
-
-      const updatedList = allRows.map((item) => {
-        const aiResult = resultMap.get(item.id)
-        if (!aiResult) return item
-
-        const hasSuggestedCat = !!aiResult.chosenCategoryId
-        const finalCategory = hasSuggestedCat ? aiResult.chosenCategoryId! : item.category
-
-        return {
-          ...item,
-          category: finalCategory,
-          confidence: aiResult.confidence,
-          needsHelp: aiResult.needsHelp,
-          suggestions: aiResult.suggestions || [],
-          aiProcessed: true,
-        }
-      })
-
-      setPreviewList(updatedList)
-
-      const remainingHelp = updatedList.filter((it) => it.needsHelp || !it.category).length
-      if (remainingHelp > 0) {
-        toast({
-          title: 'IA analisou os lançamentos',
-          description: `${response.total - remainingHelp} categorizados com sucesso. ${remainingHelp} lançamento(s) precisam da sua confirmação direta.`,
-        })
-      } else {
-        toast({
-          title: 'Categorização por IA concluída!',
-          description: `Todos os ${response.total} lançamentos foram associados com sucesso.`,
-        })
-      }
-    } catch (err: any) {
-      console.error('Falha ao categorizar com IA:', err)
-      toast({
-        title: 'IA temporariamente indisponível',
-        description:
-          err.message ||
-          'Você pode selecionar as categorias manualmente usando o campo pesquisável.',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsProcessingAi(false)
-    }
-  }
-
-  // Build preview items with auto-categorization
+  // Build preview items with auto-categorization by keywords
   const buildPreview = (
     rows: ParsedRow[],
     dCol: string,
@@ -481,27 +369,17 @@ export default function TransactionsView() {
 
       // Attempt matching category from file column or auto-categorizer
       let assignedCat: string | undefined
-      let isExplicitFromCol = false
       if (cCol && cCol !== 'none' && r[cCol]) {
         const found = categories.find((c) => c.name.toLowerCase() === r[cCol].trim().toLowerCase())
         if (found) {
           assignedCat = found.id
-          isExplicitFromCol = true
         }
       }
 
-      let matchConfidence: 'alta' | 'provavel' | 'possivel' | 'baixa' = 'baixa'
-      let needsHelp = true
-
-      if (isExplicitFromCol && assignedCat) {
-        matchConfidence = 'alta'
-        needsHelp = false
-      } else {
+      if (!assignedCat) {
         const matchResult = evaluateCategoryMatch(desc, categories)
         if (matchResult.categoryId) {
           assignedCat = matchResult.categoryId
-          matchConfidence = matchResult.confidence === 'alta' ? 'alta' : 'provavel'
-          needsHelp = false
         }
       }
 
@@ -513,47 +391,15 @@ export default function TransactionsView() {
         category: assignedCat,
         month,
         selected: true,
-        confidence: matchConfidence,
-        needsHelp,
-        suggestions: [],
-        aiProcessed: false,
       }
     })
 
     setPreviewList(preview)
-
-    // Se houver itens sem confiança, disparar IA em lote
-    const itemsNeedingAi = preview.filter((p) => p.needsHelp || !p.category)
-    if (itemsNeedingAi.length > 0) {
-      runAiBatchCategorization(preview, itemsNeedingAi)
-    }
   }
 
   // Re-build preview when user manually adjusts column mapping
   const handleApplyMapping = () => {
     buildPreview(rawRows, dateCol, descCol, amountCol, categoryCol)
-  }
-
-  // Salvar padrão de aprendizado quando o usuário define/confirma uma categoria
-  const handleLearnCategory = async (description: string, categoryId: string, idx: number) => {
-    try {
-      await learnCategoryRule(description, categoryId, 'user_preview_confirmed')
-      const updated = [...previewList]
-      updated[idx].learnedPattern = true
-      setPreviewList(updated)
-      toast({
-        title: 'Padrão memorizado pela IA!',
-        description: `"${description}" agora será categorizado automaticamente nas próximas importações.`,
-      })
-    } catch (err) {
-      console.error('Erro ao salvar aprendizado:', err)
-      toast({
-        title: 'Não foi possível gravar o padrão',
-        description:
-          'A categoria foi aplicada no lançamento atual, mas não foi salva na memória permanente.',
-        variant: 'destructive',
-      })
-    }
   }
 
   // Save imported transactions
@@ -580,22 +426,6 @@ export default function TransactionsView() {
       }))
 
       const count = await createTransactionsBatch(toInsert)
-
-      // Se houver transações categorizadas manualmente pelo usuário que antes precisavam de ajuda,
-      // registrar aprendizado silenciosamente para enriquecer a base da IA
-      const itemsToLearn = itemsToSave.filter(
-        (it) => it.needsHelp && it.category && !it.learnedPattern,
-      )
-      if (itemsToLearn.length > 0) {
-        // Enviar aprendizado em segundo plano sem bloquear a importação
-        Promise.all(
-          itemsToLearn
-            .slice(0, 10)
-            .map((it) =>
-              learnCategoryRule(it.description, it.category!, 'import_completion').catch(() => {}),
-            ),
-        )
-      }
 
       toast({
         title: 'Importação concluída',
@@ -757,13 +587,13 @@ export default function TransactionsView() {
 
       {/* Tabs for choosing Importer mode */}
       <Tabs defaultValue="statement" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 max-w-2xl bg-slate-100 p-1">
+        <TabsList className="grid w-full grid-cols-2 max-w-md bg-slate-100 p-1">
           <TabsTrigger
             value="statement"
             className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-xs"
           >
             <UploadCloud className="h-3.5 w-3.5 mr-1.5 text-blue-600" />
-            Extratos & Faturas (com IA)
+            Extratos & Faturas
           </TabsTrigger>
           <TabsTrigger
             value="planning"
@@ -771,13 +601,6 @@ export default function TransactionsView() {
           >
             <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
             Planilha Planejamento
-          </TabsTrigger>
-          <TabsTrigger
-            value="assistant"
-            className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-purple-700 data-[state=active]:shadow-xs"
-          >
-            <Bot className="h-3.5 w-3.5 mr-1.5 text-purple-600" />
-            Assistente de IA
           </TabsTrigger>
         </TabsList>
 
@@ -835,8 +658,8 @@ export default function TransactionsView() {
                 : 'Clique ou arraste seu extrato bancário ou fatura (CSV, XLSX ou PDF)'}
             </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              Categorização inteligente com IA nativa, detecção de valores, datas, descrições e
-              câmbio mensal automático.
+              Categorização automática, detecção de valores, datas, descrições e câmbio mensal
+              automático.
             </p>
             <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-blue-600 flex-wrap justify-center">
               <span>
@@ -846,11 +669,6 @@ export default function TransactionsView() {
               <ArrowRight className="h-3 w-3" />
             </div>
           </div>
-        </TabsContent>
-
-        {/* Tab 3: Native Skip Cloud AI Assistant Chat */}
-        <TabsContent value="assistant" className="pt-3">
-          <AssistantChatPanel />
         </TabsContent>
       </Tabs>
 
@@ -1203,7 +1021,7 @@ export default function TransactionsView() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Auto-identificar por IA</SelectItem>
+                    <SelectItem value="none">Auto-identificar por palavras-chave</SelectItem>
                     {uploadedHeaders.map((h) => (
                       <SelectItem key={h} value={h}>
                         {h}
@@ -1226,57 +1044,6 @@ export default function TransactionsView() {
             </div>
           )}
 
-          {/* Barra de Ações de IA no Preview */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <div className="flex items-center gap-2 text-xs">
-              <Bot className="h-4 w-4 text-purple-600 shrink-0" />
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-semibold text-slate-800">Assistente de Categorização:</span>
-                {(() => {
-                  const needsHelpCount = previewList.filter(
-                    (p) => p.needsHelp || !p.category,
-                  ).length
-                  if (needsHelpCount === 0) {
-                    return (
-                      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">
-                        100% categorizado com confiança
-                      </Badge>
-                    )
-                  }
-                  return (
-                    <Badge
-                      variant="outline"
-                      className="bg-amber-50 text-amber-800 border-amber-300 text-[10px]"
-                    >
-                      {needsHelpCount} lançamento(s) precisam de ajuda
-                    </Badge>
-                  )
-                })()}
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => runAiBatchCategorization(previewList)}
-              disabled={isProcessingAi || previewList.length === 0}
-              className="text-xs h-8 border-purple-200 text-purple-700 hover:bg-purple-50 font-semibold shadow-2xs"
-            >
-              {isProcessingAi ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin text-purple-600" />
-                  Perguntando à IA...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5 text-purple-600" />
-                  Perguntar à IA sobre os pendentes
-                </>
-              )}
-            </Button>
-          </div>
-
           {/* Preview rows */}
           <div className="flex-1 overflow-y-auto border border-slate-200 rounded-md max-h-[50vh]">
             <table className="w-full text-left text-xs">
@@ -1287,25 +1054,19 @@ export default function TransactionsView() {
                   </th>
                   <th className="py-2.5 px-3">Data</th>
                   <th className="py-2.5 px-3">Descrição</th>
-                  <th className="py-2.5 px-3 min-w-[280px]">Classificação & Sugestões da IA</th>
+                  <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
                   <th className="py-2.5 px-3 text-right">Valor (BRL)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {previewList.map((row, idx) => {
                   const isChecked = row.selected !== false
-                  const isNeedingHelp = row.needsHelp || !row.category
-                  const hasSuggestions = row.suggestions && row.suggestions.length > 0
 
                   return (
                     <tr
                       key={row.id}
                       className={`hover:bg-slate-50 transition-colors ${
-                        !isChecked
-                          ? 'opacity-40 bg-slate-50/50'
-                          : isNeedingHelp
-                            ? 'bg-amber-50/40 hover:bg-amber-50/60'
-                            : ''
+                        !isChecked ? 'opacity-40 bg-slate-50/50' : ''
                       }`}
                     >
                       <td className="py-2.5 px-3 text-center">
@@ -1330,120 +1091,26 @@ export default function TransactionsView() {
                         >
                           {row.description}
                         </div>
-                        {row.learnedPattern && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
-                            <BookmarkCheck className="h-3 w-3" /> Padrão aprendido
-                          </span>
-                        )}
                       </td>
 
-                      {/* Coluna de Categoria com Sugestões e Combobox pesquisável */}
+                      {/* Coluna de Categoria com Combobox pesquisável */}
                       <td className="py-2.5 px-3">
-                        <div className="space-y-1.5 py-1">
-                          {/* Status Badge */}
-                          <div className="flex items-center gap-1.5">
-                            {isNeedingHelp ? (
-                              <Badge
-                                variant="outline"
-                                className="bg-amber-100 text-amber-900 border-amber-300 text-[10px] font-semibold py-0"
-                              >
-                                <HelpCircle className="h-3 w-3 mr-1 text-amber-700" />
-                                IA precisa de ajuda
-                              </Badge>
-                            ) : row.confidence === 'alta' ? (
-                              <Badge
-                                variant="outline"
-                                className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-medium py-0"
-                              >
-                                Confiança alta
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="bg-blue-50 text-blue-800 border-blue-200 text-[10px] font-medium py-0"
-                              >
-                                {row.confidence === 'provavel' ? 'Provável' : 'Possível'}
-                              </Badge>
-                            )}
-
-                            {/* Botão de memorizar padrão quando classificado */}
-                            {row.category && !row.learnedPattern && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleLearnCategory(row.description, row.category!, idx)
-                                }
-                                className="text-[10px] text-slate-500 hover:text-blue-700 hover:underline flex items-center gap-0.5"
-                                title="Memorizar este padrão para as próximas importações"
-                              >
-                                <BookmarkCheck className="h-3 w-3" />
-                                Memorizar
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Seletor Pesquisável CategorySelectCombobox */}
-                          <div className="w-full max-w-[270px]">
-                            <CategorySelectCombobox
-                              categories={categories}
-                              value={row.category || 'none'}
-                              onChange={(val) => {
-                                const updated = [...previewList]
-                                const chosen = val === 'none' ? undefined : val
-                                updated[idx].category = chosen
-                                if (chosen) {
-                                  updated[idx].needsHelp = false
-                                  updated[idx].confidence = 'alta'
-                                }
-                                setPreviewList(updated)
-                              }}
-                              triggerClassName="h-7 text-xs"
-                              placeholder="Como classificar este lançamento?"
-                              searchPlaceholder="Buscar categoria ou subcategoria..."
-                              emptyText="Nenhuma categoria encontrada."
-                              specialOption={{ id: 'none', label: 'Não Categorizado' }}
-                            />
-                          </div>
-
-                          {/* Opções estimadas sugeridas pela IA (1 a 3 opções com rótulo) */}
-                          {hasSuggestions && (
-                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                              <span className="text-[10px] text-slate-500">Opções estimadas:</span>
-                              {row.suggestions!.map((sug, sIdx) => {
-                                const isCurrent = row.category === sug.categoryId
-                                return (
-                                  <button
-                                    key={sIdx}
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = [...previewList]
-                                      updated[idx].category = sug.categoryId
-                                      updated[idx].confidence = sug.confidence
-                                      updated[idx].needsHelp = false
-                                      setPreviewList(updated)
-                                    }}
-                                    className={`text-[10px] px-2 py-0.5 rounded-md border transition-all flex items-center gap-1 ${
-                                      isCurrent
-                                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
-                                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                                    }`}
-                                    title={sug.reason || `Sugerido pela IA (${sug.confidence})`}
-                                  >
-                                    <span>{sug.categoryName}</span>
-                                    <span
-                                      className={`text-[9px] uppercase px-1 rounded ${
-                                        isCurrent
-                                          ? 'bg-blue-700 text-blue-100'
-                                          : 'bg-slate-100 text-slate-500'
-                                      }`}
-                                    >
-                                      {sug.confidence === 'provavel' ? 'provável' : 'possível'}
-                                    </span>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
+                        <div className="w-full max-w-[270px]">
+                          <CategorySelectCombobox
+                            categories={categories}
+                            value={row.category || 'none'}
+                            onChange={(val) => {
+                              const updated = [...previewList]
+                              const chosen = val === 'none' ? undefined : val
+                              updated[idx].category = chosen
+                              setPreviewList(updated)
+                            }}
+                            triggerClassName="h-7 text-xs"
+                            placeholder="Selecione a categoria..."
+                            searchPlaceholder="Buscar categoria ou subcategoria..."
+                            emptyText="Nenhuma categoria encontrada."
+                            specialOption={{ id: 'none', label: 'Não Categorizado' }}
+                          />
                         </div>
                       </td>
 
