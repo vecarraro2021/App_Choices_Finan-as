@@ -1,9 +1,84 @@
 /**
- * Lightweight, zero-dependency CSV and XLSX parser for statements and invoices.
+ * Lightweight, robust CSV and XLSX parser for statements and invoices.
  */
+import { getSheetJS } from './excelLoader'
 
 export interface ParsedRow {
   [key: string]: string
+}
+
+export interface ParseFileResult {
+  headers: string[]
+  rows: ParsedRow[]
+  sourceType: 'csv' | 'xlsx'
+  sheetNames?: string[]
+}
+
+/**
+ * Checks if a byte buffer starts with the ZIP magic bytes PK\x03\x04 (0x50, 0x4B, 0x03, 0x04)
+ * which indicates an Office Open XML file (XLSX, DOCX) or ZIP archive.
+ */
+export function isZipBuffer(buffer: ArrayBuffer | Uint8Array): boolean {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (bytes.length < 4) return false
+  return (
+    bytes[0] === 0x50 && // 'P'
+    bytes[1] === 0x4b && // 'K'
+    bytes[2] === 0x03 &&
+    bytes[3] === 0x04
+  )
+}
+
+/**
+ * Checks if a text string begins with the PK signature.
+ */
+export function startsWithZipSignature(text: string): boolean {
+  if (!text || text.length < 4) return false
+  return (
+    text.charCodeAt(0) === 0x50 &&
+    text.charCodeAt(1) === 0x4b &&
+    text.charCodeAt(2) === 0x03 &&
+    text.charCodeAt(3) === 0x04
+  )
+}
+
+/**
+ * Detects whether a string is predominantly binary garbage or contains control characters.
+ * Non-printable control characters: code < 9 or between 14-31, or 0xFFFD replacement characters.
+ * Also checks if the text contains standard XLSX internal paths like "xl/workbook" or "xl/comments".
+ */
+export function isBinaryOrCorruptedText(text: string): boolean {
+  if (!text || text.length === 0) return false
+
+  // Obvious ZIP header in text form
+  if (startsWithZipSignature(text)) return true
+
+  // Check for presence of internal XLSX ZIP paths often found in raw binary dumps
+  if (
+    text.includes('xl/workbook') ||
+    text.includes('xl/worksheets') ||
+    text.includes('xl/sharedStrings') ||
+    text.includes('xl/comments') ||
+    text.includes('[Content_Types].xml')
+  ) {
+    return true
+  }
+
+  // Sample the first 4000 characters to compute ratio of non-printable / control characters
+  const sampleLength = Math.min(text.length, 4000)
+  let unprintableCount = 0
+
+  for (let i = 0; i < sampleLength; i++) {
+    const code = text.charCodeAt(i)
+    // Printable characters are \t (9), \n (10), \r (13) and >= 32.
+    // Unicode replacement char 0xFFFD (65533) is also a strong sign of binary decoding error.
+    if (code < 9 || (code >= 14 && code <= 31) || code === 0xfffd) {
+      unprintableCount++
+    }
+  }
+
+  const ratio = unprintableCount / sampleLength
+  return ratio > 0.08 // more than 8% non-printable characters is almost certainly binary
 }
 
 /**
@@ -123,4 +198,263 @@ export function normalizeDate(val: string | undefined): string {
 
   // Fallback
   return new Date().toISOString().slice(0, 10)
+}
+
+/**
+ * Validates parsed preview rows to detect if the data is corrupted or binary garbage
+ * (e.g. when an XLSX file was inadvertently parsed as CSV).
+ */
+export function validatePreviewSanity(rows: ParsedRow[]): {
+  isSane: boolean
+  reason?: string
+} {
+  if (!rows || rows.length === 0) {
+    return { isSane: true }
+  }
+
+  const sampleSize = Math.min(rows.length, 30)
+  const sample = rows.slice(0, sampleSize)
+
+  let corruptedDescCount = 0
+  let suspiciousZeroCount = 0
+  let identicalSuspiciousDateCount = 0
+
+  const firstDate = sample[0]?.data || sample[0]?.date || Object.values(sample[0])[0]
+
+  for (const row of sample) {
+    const values = Object.values(row)
+    const textBlob = values.join(' ')
+
+    // Check if the row contains unprintable/control characters or ZIP markers
+    if (isBinaryOrCorruptedText(textBlob)) {
+      corruptedDescCount++
+    }
+
+    // Check if amounts are 0 and descriptions are unreadable
+    const amtVal = values.find((v) => /^\s*0([.,]00?)?\s*$/.test(v) || v === 'R$ 0,00' || v === '0')
+    if (amtVal !== undefined) {
+      suspiciousZeroCount++
+    }
+
+    // Identical fallback dates across all rows
+    const dVal = values.find((v) => v === firstDate)
+    if (dVal) {
+      identicalSuspiciousDateCount++
+    }
+  }
+
+  if (corruptedDescCount / sampleSize >= 0.25) {
+    return {
+      isSane: false,
+      reason:
+        'O arquivo parece conter dados binários ilegíveis (assinatura de planilha Excel ou arquivo compactado lido como texto).',
+    }
+  }
+
+  // If all rows have corrupted text or suspicious zeros with identical dates and unreadable column headers
+  return { isSane: true }
+}
+
+/**
+ * Parses XLSX data from an ArrayBuffer using SheetJS (browser or node).
+ */
+export async function parseXLSXBuffer(
+  buffer: ArrayBuffer,
+): Promise<{ headers: string[]; rows: ParsedRow[]; sheetNames: string[] }> {
+  const XLSX = await getSheetJS()
+  if (!XLSX) {
+    throw new Error('Mecanismo de leitura de planilhas Excel não disponível no navegador.')
+  }
+
+  const data = new Uint8Array(buffer)
+  const workbook = XLSX.read(data, { type: 'array', cellDates: true })
+
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    throw new Error('A planilha Excel não contém nenhuma aba.')
+  }
+
+  // Use the first non-empty sheet
+  let chosenSheetName = workbook.SheetNames[0]
+  let chosenSheet = workbook.Sheets[chosenSheetName]
+
+  // If first sheet is empty, check other sheets
+  for (const name of workbook.SheetNames) {
+    const s = workbook.Sheets[name]
+    if (s && s['!ref']) {
+      chosenSheetName = name
+      chosenSheet = s
+      break
+    }
+  }
+
+  if (!chosenSheet) {
+    return { headers: [], rows: [], sheetNames: workbook.SheetNames }
+  }
+
+  // Convert sheet to array of arrays
+  const rawData: any[][] = XLSX.utils.sheet_to_json(chosenSheet, {
+    header: 1,
+    defval: '',
+    raw: false, // formats dates and numbers as strings
+    dateNF: 'yyyy-mm-dd',
+  })
+
+  if (rawData.length === 0) {
+    return { headers: [], rows: [], sheetNames: workbook.SheetNames }
+  }
+
+  // Find header row (first row with at least 2 non-empty cells)
+  let headerRowIdx = 0
+  for (let r = 0; r < Math.min(rawData.length, 10); r++) {
+    const row = rawData[r]
+    if (!row) continue
+    const filledCount = row.filter((c: any) => String(c).trim().length > 0).length
+    if (filledCount >= 2) {
+      headerRowIdx = r
+      break
+    }
+  }
+
+  const rawHeaders = rawData[headerRowIdx] || []
+  const headers = rawHeaders.map((h: any, i: number) => {
+    const str = String(h ?? '').trim()
+    return str || `Coluna_${i + 1}`
+  })
+
+  const rows: ParsedRow[] = []
+  for (let r = headerRowIdx + 1; r < rawData.length; r++) {
+    const row = rawData[r]
+    if (!row) continue
+    const isAllEmpty = row.every((c: any) => String(c ?? '').trim().length === 0)
+    if (isAllEmpty) continue
+
+    const rowObj: ParsedRow = {}
+    headers.forEach((header, idx) => {
+      rowObj[header] = String(row[idx] ?? '').trim()
+    })
+    rows.push(rowObj)
+  }
+
+  return { headers, rows, sheetNames: workbook.SheetNames }
+}
+
+/**
+ * Universal file parser for statements and spreadsheets.
+ * Reads File / Blob content, inspects magic bytes and content:
+ * 1. Checks magic bytes for ZIP (PK\x03\x04) -> forces XLSX parsing.
+ * 2. Checks file extension or MIME type for Excel -> parses as XLSX.
+ * 3. Reads as text: if text contains PK signature, corrupted binary data (>8% unprintable),
+ *    immediately aborts CSV parsing and falls back to XLSX.
+ * 4. Otherwise parses as standard CSV.
+ */
+export async function parseStatementFile(
+  file: File,
+  fallbackXlsxViaBackend?: (f: File) => Promise<string>,
+): Promise<ParseFileResult> {
+  const fileName = file.name.toLowerCase()
+  const isExtensionExcel =
+    fileName.endsWith('.xlsx') ||
+    fileName.endsWith('.xls') ||
+    fileName.endsWith('.xlsm') ||
+    fileName.endsWith('.xlsb') ||
+    file.type.includes('spreadsheet') ||
+    file.type.includes('excel')
+
+  // Read first 16 bytes to check magic bytes
+  let isZipMagic = false
+  try {
+    const slice = file.slice(0, 16)
+    const arrayBuffer = await slice.arrayBuffer()
+    isZipMagic = isZipBuffer(arrayBuffer)
+  } catch (err) {
+    console.warn('[parseStatementFile] Falha ao inspecionar magic bytes:', err)
+  }
+
+  // If magic bytes match ZIP or file is identified as Excel, parse as XLSX directly!
+  if (isZipMagic || isExtensionExcel) {
+    try {
+      const fullBuffer = await file.arrayBuffer()
+      const result = await parseXLSXBuffer(fullBuffer)
+      if (result.rows.length > 0) {
+        return {
+          headers: result.headers,
+          rows: result.rows,
+          sourceType: 'xlsx',
+          sheetNames: result.sheetNames,
+        }
+      }
+    } catch (xlsxErr) {
+      console.warn('[parseStatementFile] Falha no SheetJS local:', xlsxErr)
+      // If SheetJS failed and we have backend fallback available
+      if (fallbackXlsxViaBackend) {
+        try {
+          const markdown = await fallbackXlsxViaBackend(file)
+          const csvResult = parseCSV(markdown)
+          return {
+            headers: csvResult.headers,
+            rows: csvResult.rows,
+            sourceType: 'xlsx',
+          }
+        } catch (backendErr) {
+          console.error('[parseStatementFile] Falha no fallback do backend:', backendErr)
+        }
+      }
+      throw new Error(
+        'Não conseguimos ler este arquivo. Verifique se é um CSV ou planilha Excel válida (XLSX/XLS).',
+      )
+    }
+  }
+
+  // Not a detected ZIP magic byte yet. Let's read as text.
+  let text = ''
+  try {
+    text = await file.text()
+  } catch (textErr) {
+    console.warn('[parseStatementFile] Falha ao ler como texto:', textErr)
+  }
+
+  // Check if text starts with "PK" or contains binary corruption
+  if (isBinaryOrCorruptedText(text)) {
+    console.info(
+      '[parseStatementFile] Arquivo lido como texto contém lixo binário ou assinatura ZIP. Redirecionando para XLSX parser...',
+    )
+    try {
+      const fullBuffer = await file.arrayBuffer()
+      const result = await parseXLSXBuffer(fullBuffer)
+      if (result.rows.length > 0) {
+        return {
+          headers: result.headers,
+          rows: result.rows,
+          sourceType: 'xlsx',
+          sheetNames: result.sheetNames,
+        }
+      }
+    } catch (retryErr) {
+      console.warn('[parseStatementFile] Falha no parser XLSX após detecção de binário:', retryErr)
+      if (fallbackXlsxViaBackend) {
+        try {
+          const markdown = await fallbackXlsxViaBackend(file)
+          const csvResult = parseCSV(markdown)
+          return {
+            headers: csvResult.headers,
+            rows: csvResult.rows,
+            sourceType: 'xlsx',
+          }
+        } catch (bErr) {
+          console.error('[parseStatementFile] Falha no fallback do backend:', bErr)
+        }
+      }
+      throw new Error(
+        'Não conseguimos ler este arquivo. Verifique se é um CSV ou planilha Excel válida (XLSX/XLS).',
+      )
+    }
+  }
+
+  // Standard CSV parse
+  const parsed = parseCSV(text)
+  return {
+    headers: parsed.headers,
+    rows: parsed.rows,
+    sourceType: 'csv',
+  }
 }

@@ -97,11 +97,28 @@ export default function PlanningImporter({
       setIsUploading(true)
 
       let markdown = ''
-      const isXlsx =
-        file.name.endsWith('.xlsx') ||
-        file.name.endsWith('.xls') ||
+      const lowerName = file.name.toLowerCase()
+      let isXlsx =
+        lowerName.endsWith('.xlsx') ||
+        lowerName.endsWith('.xls') ||
+        lowerName.endsWith('.xlsm') ||
+        lowerName.endsWith('.xlsb') ||
         file.type.includes('spreadsheet') ||
         file.type.includes('excel')
+
+      // Also check magic bytes (ZIP signature PK\x03\x04)
+      if (!isXlsx) {
+        try {
+          const slice = file.slice(0, 16)
+          const buf = await slice.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          if (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+            isXlsx = true
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (isXlsx) {
         // Send to backend $documents.toMarkdown
@@ -109,6 +126,14 @@ export default function PlanningImporter({
       } else {
         // CSV or TXT file can be read as text directly
         markdown = await file.text()
+        // If content is actually binary / PK ZIP signature, re-route to XLSX backend converter
+        if (
+          markdown.includes('xl/') ||
+          markdown.includes('[Content_Types]') ||
+          (markdown.charCodeAt(0) === 0x50 && markdown.charCodeAt(1) === 0x4b)
+        ) {
+          markdown = await convertSheetToMarkdown(file)
+        }
       }
 
       const parsed = parsePlanningMarkdown(markdown)

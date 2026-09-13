@@ -12,7 +12,16 @@ import {
   getRateForMonth,
 } from '@/services/financeService'
 import { suggestCategory, evaluateCategoryMatch } from '@/lib/categorizer'
-import { parseCSV, parseAmount, normalizeDate, ParsedRow } from '@/lib/fileParser'
+import {
+  parseCSV,
+  parseAmount,
+  normalizeDate,
+  ParsedRow,
+  parseStatementFile,
+  validatePreviewSanity,
+  isBinaryOrCorruptedText,
+} from '@/lib/fileParser'
+import { convertSheetToMarkdown } from '@/services/financeService'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { Transaction, Category, ExchangeRate } from '@/types/finance'
 import { extractTextFromPDF } from '@/lib/pdfExtractor'
@@ -274,7 +283,7 @@ export default function TransactionsView() {
     }
   }
 
-  // Handle file select (CSV, TXT ou PDF)
+  // Handle file select (CSV, XLSX, XLS, TXT ou PDF)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -291,13 +300,26 @@ export default function TransactionsView() {
       setImportFileType('csv')
       setPdfMeta(null)
 
-      const text = await file.text()
-      const parsed = parseCSV(text)
+      // Parse using parseStatementFile which checks magic bytes, handles binary abort, and supports XLSX
+      const parsed = await parseStatementFile(file, convertSheetToMarkdown)
 
       if (parsed.headers.length === 0 || parsed.rows.length === 0) {
         toast({
           title: 'Arquivo vazio ou formato não suportado',
           description: 'Não foi possível ler as colunas do arquivo enviado.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Check sanity: prevent binary garbage in preview
+      const sanity = validatePreviewSanity(parsed.rows)
+      if (!sanity.isSane) {
+        toast({
+          title: 'Arquivo corrompido ou formato binário não reconhecido',
+          description:
+            sanity.reason ||
+            'Não conseguimos ler este arquivo. Verifique se é um CSV ou planilha Excel válida (XLSX/XLS).',
           variant: 'destructive',
         })
         return
@@ -339,11 +361,18 @@ export default function TransactionsView() {
 
       buildPreview(parsed.rows, detectedDate, detectedDesc, detectedAmount, detectedCat)
       setShowPreviewDialog(true)
-    } catch (err) {
+
+      if (parsed.sourceType === 'xlsx') {
+        toast({
+          title: 'Planilha Excel identificada',
+          description: `${parsed.rows.length} linhas lidas com sucesso. Confirme as colunas abaixo.`,
+        })
+      }
+    } catch (err: any) {
       console.error(err)
       toast({
-        title: 'Erro ao processar arquivo',
-        description: 'Verifique se o arquivo é um CSV, XLSX ou extrato válido.',
+        title: 'Não conseguimos ler este arquivo',
+        description: err.message || 'Verifique se é um CSV ou planilha Excel válida (XLSX/XLS).',
         variant: 'destructive',
       })
     } finally {
@@ -402,8 +431,54 @@ export default function TransactionsView() {
     buildPreview(rawRows, dateCol, descCol, amountCol, categoryCol)
   }
 
+  // Safety check on preview items: warns if suspiciously binary, unreadable or 100% 0 with identical date
+  const previewSanityAlert = useMemo(() => {
+    if (previewList.length === 0) return null
+
+    const sample = previewList.slice(0, 30)
+    let corruptedDescCount = 0
+    let zeroCount = 0
+
+    const firstDate = sample[0]?.date
+
+    sample.forEach((item) => {
+      // Check for binary garbage in description
+      const desc = item.description || ''
+      if (isBinaryOrCorruptedText(desc)) {
+        corruptedDescCount++
+      }
+      if (item.amount === 0) {
+        zeroCount++
+      }
+    })
+
+    const isBinaryRatioHigh = corruptedDescCount / sample.length >= 0.2
+    const allZeroSuspicious =
+      zeroCount === sample.length && sample.every((it) => it.date === firstDate)
+
+    if (isBinaryRatioHigh || (allZeroSuspicious && sample.length > 5)) {
+      return {
+        isCorrupted: true,
+        message:
+          'Atenção: Os dados pré-visualizados contêm caracteres binários ou descrições ilegíveis. O arquivo pode ser uma planilha Excel (XLSX) processada de forma incompatível.',
+      }
+    }
+
+    return null
+  }, [previewList])
+
   // Save imported transactions
   const handleConfirmImport = async () => {
+    if (previewSanityAlert?.isCorrupted) {
+      toast({
+        title: 'Importação bloqueada por segurança',
+        description:
+          'Os dados contêm caracteres ilegíveis ou binários. Corrija o mapeamento ou envie o arquivo como planilha Excel válida.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     const itemsToSave = previewList.filter((item) => item.selected !== false)
     if (itemsToSave.length === 0) {
       toast({
@@ -939,6 +1014,17 @@ export default function TransactionsView() {
             </div>
           )}
 
+          {/* Banner de alerta caso preview contenha anomalias ou dados binários */}
+          {previewSanityAlert && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-semibold block">Aviso de formato ou compatibilidade:</span>
+                <p>{previewSanityAlert.message}</p>
+              </div>
+            </div>
+          )}
+
           {/* Column selector form (apenas para CSV) */}
           {importFileType === 'csv' && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
@@ -1150,7 +1236,9 @@ export default function TransactionsView() {
               <Button
                 onClick={handleConfirmImport}
                 disabled={
-                  isImporting || previewList.filter((it) => it.selected !== false).length === 0
+                  isImporting ||
+                  previewSanityAlert?.isCorrupted ||
+                  previewList.filter((it) => it.selected !== false).length === 0
                 }
                 className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
               >
