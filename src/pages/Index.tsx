@@ -6,10 +6,18 @@ import {
   getAllTransactions,
   getCategories,
   getIncomes,
+  getRecurringIncomes,
   getMonthlyTotals,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
-import { Transaction, Category, Income, MonthlyTotal, Alert } from '@/types/finance'
+import {
+  Transaction,
+  Category,
+  Income,
+  RecurringIncome,
+  MonthlyTotal,
+  Alert,
+} from '@/types/finance'
 import { formatCurrency, formatPercent, formatMonthShort } from '@/lib/formatters'
 import { CountUp } from '@/components/CountUp'
 import {
@@ -49,26 +57,29 @@ export default function Index() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [incomes, setIncomes] = useState<Income[]>([])
+  const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [monthlyTotals, setMonthlyTotals] = useState<MonthlyTotal[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
 
   // Load initial data
   const loadData = async () => {
     try {
-      const [txs, cats, incs, mTotals] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
+        getRecurringIncomes(),
         getMonthlyTotals(),
       ])
 
       setTransactions(txs)
       setCategories(cats)
       setIncomes(incs)
+      setRecurringIncomes(recIncs)
       setMonthlyTotals(mTotals)
 
-      // Compute and sync dynamic alerts
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals)
+      // Compute and sync dynamic alerts (considering active recurring incomes)
+      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs)
       setAlerts(
         computed.map((c, i) => ({
           id: `comp-${i}`,
@@ -93,6 +104,7 @@ export default function Index() {
   // Real-time subscriptions
   useRealtime('transactions', () => loadData())
   useRealtime('income', () => loadData())
+  useRealtime('recurring_incomes', () => loadData())
   useRealtime('categories', () => loadData())
 
   // Calculations for Metrics

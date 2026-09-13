@@ -1,4 +1,11 @@
-import { Transaction, Income, Category, Alert, MonthlyTotal } from '@/types/finance'
+import {
+  Transaction,
+  Income,
+  RecurringIncome,
+  Category,
+  Alert,
+  MonthlyTotal,
+} from '@/types/finance'
 import { clearAndSaveAlerts } from '@/services/financeService'
 import { formatCurrency, formatMonthLong, formatMonthShort } from '@/lib/formatters'
 
@@ -11,7 +18,7 @@ export interface ComputedAlert {
 
 /**
  * Computes alerts dynamically based on actual database records:
- * (a) Sem receita registrada em mês com despesas -> critical
+ * (a) Sem receita registrada em mês com despesas -> critical (receitas recorrentes ativas cobrem automaticamente)
  * (b) Orçamento mensal superado -> warning com % (mês e categoria)
  * (c) Categoria concentra > 25% do gasto total -> info
  * (d) Pico atípico: categoria com gasto mensal > 2.5x da própria média histórica -> warning
@@ -22,10 +29,15 @@ export async function computeAndSyncAlerts(
   incomes: Income[],
   categories: Category[],
   monthlyTotals: MonthlyTotal[] = [],
+  recurringIncomes: RecurringIncome[] = [],
 ): Promise<ComputedAlert[]> {
   const alerts: ComputedAlert[] = []
 
-  if (transactions.length === 0 && incomes.length === 0) {
+  const activeRecurringSumBrl = recurringIncomes
+    .filter((r) => r.active)
+    .reduce((sum, r) => sum + (Number(r.amount_brl) || 0), 0)
+
+  if (transactions.length === 0 && incomes.length === 0 && activeRecurringSumBrl === 0) {
     return alerts
   }
 
@@ -50,7 +62,7 @@ export async function computeAndSyncAlerts(
     expensesByCategoryTotal[catId] = (expensesByCategoryTotal[catId] || 0) + amount
   }
 
-  // Group income by month
+  // Group income by month (punctual + active recurring)
   const incomeByMonth: Record<string, number> = {}
   for (const inc of incomes) {
     const m = inc.month
@@ -60,14 +72,15 @@ export async function computeAndSyncAlerts(
   // Rule (a): No income registered in a month with expenses -> Critical
   const monthsWithExpenses = Object.keys(expensesByMonth).sort()
   for (const m of monthsWithExpenses) {
-    const incVal = incomeByMonth[m] || 0
+    const punctualInc = incomeByMonth[m] || 0
+    const incVal = punctualInc + activeRecurringSumBrl
     const expVal = expensesByMonth[m]
     if (incVal === 0 && expVal > 0) {
       alerts.push({
         severity: 'critical',
         title: `Ponto Cego: Sem receita registrada em ${formatMonthShort(m)}`,
         description: `Há um total de ${formatCurrency(expVal, 'BRL')} em despesas registradas em ${formatMonthLong(m)}, porém nenhuma entrada financeira vinculada. Sem receita, não é possível calcular taxa de poupança ou saúde financeira real.`,
-        suggestion: `Acesse a aba "Receitas" e cadastre suas fontes de renda (salário, dividendos, pró-labore) deste mês.`,
+        suggestion: `Acesse a aba "Receitas" e cadastre suas receitas recorrentes automáticas ou pontuais deste mês.`,
       })
     } else if (incVal > 0 && expVal > incVal) {
       const deficit = expVal - incVal

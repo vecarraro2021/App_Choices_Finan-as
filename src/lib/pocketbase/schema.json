@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-13T12:37:04.213Z",
+  "generatedAt": "2026-09-13T12:42:21.369Z",
   "collections": [
     {
       "name": "users",
@@ -383,6 +383,65 @@
         "CREATE INDEX idx_monthly_totals_user ON monthly_totals (user)",
         "CREATE INDEX idx_monthly_totals_month ON monthly_totals (month)"
       ]
+    },
+    {
+      "name": "recurring_incomes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && user = @request.auth.id",
+        "view": "@request.auth.id != '' && user = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
+        "update": "@request.auth.id != '' && user = @request.auth.id",
+        "delete": "@request.auth.id != '' && user = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "amount_eur",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "amount_brl",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "active",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE INDEX idx_recurring_incomes_user ON recurring_incomes (user)"]
     }
   ]
 }

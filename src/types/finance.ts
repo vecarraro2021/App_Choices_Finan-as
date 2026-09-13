@@ -45,6 +45,17 @@ export interface Income {
   updated?: string
 }
 
+export interface RecurringIncome {
+  id: string
+  user: string
+  description: string
+  amount_eur: number
+  amount_brl: number
+  active: boolean
+  created?: string
+  updated?: string
+}
+
 export interface Alert {
   id: string
   user: string

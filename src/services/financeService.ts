@@ -1,5 +1,12 @@
 import pb from '@/lib/pocketbase/client'
-import { Category, Transaction, Income, Alert, MonthlyTotal } from '@/types/finance'
+import {
+  Category,
+  Transaction,
+  Income,
+  RecurringIncome,
+  Alert,
+  MonthlyTotal,
+} from '@/types/finance'
 
 // ==================== CATEGORIES ====================
 export async function getCategories(): Promise<Category[]> {
@@ -160,6 +167,70 @@ export async function updateIncome(id: string, data: Partial<Income>): Promise<I
 
 export async function deleteIncome(id: string): Promise<void> {
   await pb.collection('income').delete(id)
+}
+
+// ==================== RECURRING INCOMES ====================
+export async function getRecurringIncomes(filter?: string): Promise<RecurringIncome[]> {
+  return await pb.collection('recurring_incomes').getFullList<RecurringIncome>({
+    filter,
+    sort: '-created',
+  })
+}
+
+export async function createRecurringIncome(data: {
+  description: string
+  amount_eur: number
+  amount_brl: number
+  active?: boolean
+}): Promise<RecurringIncome> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  return await pb.collection('recurring_incomes').create<RecurringIncome>({
+    ...data,
+    active: data.active !== undefined ? data.active : true,
+    user: userId,
+  })
+}
+
+export async function updateRecurringIncome(
+  id: string,
+  data: Partial<RecurringIncome>,
+): Promise<RecurringIncome> {
+  return await pb.collection('recurring_incomes').update<RecurringIncome>(id, data)
+}
+
+export async function deleteRecurringIncome(id: string): Promise<void> {
+  await pb.collection('recurring_incomes').delete(id)
+}
+
+/**
+ * Agregador de receita por mês:
+ * Soma receitas pontuais daquele mês + a soma de todas as receitas recorrentes ativas.
+ */
+export function calculateMonthIncome(
+  month: string,
+  incomes: Income[],
+  recurringIncomes: RecurringIncome[],
+): { brl: number; eur: number } {
+  const activeRecurring = recurringIncomes.filter((r) => r.active)
+  const recurringBrl = activeRecurring.reduce((sum, r) => sum + (Number(r.amount_brl) || 0), 0)
+  const recurringEur = activeRecurring.reduce(
+    (sum, r) => sum + (Number(r.amount_eur) || (Number(r.amount_brl) || 0) / 6.0),
+    0,
+  )
+
+  const monthIncomes = incomes.filter((i) => i.month === month)
+  const punctualBrl = monthIncomes.reduce((sum, i) => sum + (Number(i.amount_brl) || 0), 0)
+  const punctualEur = monthIncomes.reduce(
+    (sum, i) => sum + (Number(i.amount_eur) || (Number(i.amount_brl) || 0) / 6.0),
+    0,
+  )
+
+  return {
+    brl: punctualBrl + recurringBrl,
+    eur: punctualEur + recurringEur,
+  }
 }
 
 // ==================== MONTHLY TOTALS ====================

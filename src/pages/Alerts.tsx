@@ -5,10 +5,18 @@ import {
   getAllTransactions,
   getCategories,
   getIncomes,
+  getRecurringIncomes,
   getMonthlyTotals,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
-import { Alert, Category, Income, MonthlyTotal, Transaction } from '@/types/finance'
+import {
+  Alert,
+  Category,
+  Income,
+  RecurringIncome,
+  MonthlyTotal,
+  Transaction,
+} from '@/types/finance'
 import { ShieldAlert, AlertTriangle, Info, RefreshCw, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,14 +34,15 @@ export default function AlertsView() {
   const runEngine = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, incs, mTotals] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
+        getRecurringIncomes(),
         getMonthlyTotals(),
       ])
 
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals)
+      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs)
 
       const mapped: Alert[] = computed.map((c, i) => ({
         id: `alert-${i}`,
@@ -74,6 +83,7 @@ export default function AlertsView() {
 
   useRealtime('transactions', () => runEngine())
   useRealtime('income', () => runEngine())
+  useRealtime('recurring_incomes', () => runEngine())
   useRealtime('categories', () => runEngine())
 
   return (
