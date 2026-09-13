@@ -267,6 +267,245 @@ export async function getAlerts(): Promise<Alert[]> {
   })
 }
 
+// ==================== PLANNING SPREADSHEET IMPORT ====================
+
+/**
+ * Uploads an XLSX/CSV file to the backend to be converted to Markdown via $documents.toMarkdown
+ */
+export async function convertSheetToMarkdown(file: File): Promise<string> {
+  const formData = new FormData()
+  formData.append('arquivo', file)
+
+  const token = pb.authStore.token
+  const baseUrl = pb.baseURL || ''
+
+  const res = await fetch(`${baseUrl}/backend/v1/documentos/convert-sheet`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    throw new Error(errorText || 'Falha ao converter arquivo no servidor')
+  }
+
+  const json = await res.json()
+  return json.markdown || ''
+}
+
+/**
+ * Executes the full planning sheet import into PocketBase:
+ * 1. Synchronizes Categories (main and sub) with estimated values
+ * 2. Optionally replaces existing source="importado" transactions for the selected months
+ * 3. Batch inserts historical transactions (in EUR)
+ */
+export async function importPlanningData(params: {
+  year: number
+  sections: Array<{
+    name: string
+    items: Array<{
+      name: string
+      subgroup?: string
+      estimated: number
+      monthlyValues: Record<string, number>
+    }>
+  }>
+  replaceExisting: boolean
+  monthsToImport: number[] // e.g. [1, 2, 3, 4, 5, 6, 7, 8]
+}): Promise<{
+  mainCategoriesCreated: number
+  subCategoriesCreated: number
+  categoriesUpdated: number
+  transactionsCreated: number
+  transactionsDeleted: number
+}> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  // 1. Fetch current categories
+  const currentCategories = await getCategories()
+
+  // Helper to normalize names
+  const norm = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '')
+
+  let mainCategoriesCreated = 0
+  let subCategoriesCreated = 0
+  let categoriesUpdated = 0
+
+  // Palette for new main categories
+  const defaultColors = [
+    '#2563EB',
+    '#EC4899',
+    '#8B5CF6',
+    '#F59E0B',
+    '#10B981',
+    '#06B6D4',
+    '#6366F1',
+    '#F97316',
+    '#14B8A6',
+    '#84CC16',
+    '#64748B',
+  ]
+
+  // Track map of normalized main category names to category records
+  const mainMap = new Map<string, Category>()
+  currentCategories
+    .filter((c) => c.type === 'main')
+    .forEach((c) => {
+      mainMap.set(norm(c.name), c)
+    })
+
+  // Map of subcategories: key `${parentNorm}::${subNorm}` -> Category
+  const subMap = new Map<string, Category>()
+  currentCategories
+    .filter((c) => c.type === 'sub')
+    .forEach((c) => {
+      const parent = currentCategories.find((p) => p.id === c.parent)
+      const parentKey = parent ? norm(parent.name) : 'none'
+      subMap.set(`${parentKey}::${norm(c.name)}`, c)
+      // Also map bare sub name for fallback
+      if (!subMap.has(`none::${norm(c.name)}`)) {
+        subMap.set(`none::${norm(c.name)}`, c)
+      }
+    })
+
+  // Process all sections
+  for (const section of params.sections) {
+    const secNorm = norm(section.name)
+    let mainCat = mainMap.get(secNorm)
+
+    if (!mainCat) {
+      // Create main category
+      const color = defaultColors[mainMap.size % defaultColors.length]
+      mainCat = await createCategory({
+        name: section.name,
+        type: 'main',
+        color,
+        estimated: 0,
+      })
+      mainMap.set(secNorm, mainCat)
+      mainCategoriesCreated++
+    }
+
+    // Process each subcategory in section
+    for (const item of section.items) {
+      const itemNorm = norm(item.name)
+      const subKey = `${secNorm}::${itemNorm}`
+      let subCat = subMap.get(subKey) || subMap.get(`none::${itemNorm}`)
+
+      if (!subCat) {
+        // Create subcategory
+        subCat = await createCategory({
+          name: item.name,
+          type: 'sub',
+          parent: mainCat.id,
+          estimated: item.estimated || 0,
+        })
+        subMap.set(subKey, subCat)
+        subCategoriesCreated++
+      } else {
+        // Update estimated if provided (> 0)
+        let needsUpdate = false
+        const updateData: Partial<Category> = {}
+
+        if (item.estimated > 0 && subCat.estimated !== item.estimated) {
+          updateData.estimated = item.estimated
+          needsUpdate = true
+        }
+
+        // Ensure parent is linked correctly if it wasn't
+        if (!subCat.parent || subCat.parent !== mainCat.id) {
+          updateData.parent = mainCat.id
+          needsUpdate = true
+        }
+
+        if (needsUpdate) {
+          subCat = await updateCategory(subCat.id, updateData)
+          categoriesUpdated++
+        }
+      }
+    }
+  }
+
+  // 2. Format months to YYYY-MM
+  const targetMonths = params.monthsToImport.map(
+    (m) => `${params.year}-${String(m).padStart(2, '0')}`,
+  )
+
+  // 3. If replaceExisting, delete existing imported transactions for these months
+  let transactionsDeleted = 0
+  if (params.replaceExisting) {
+    for (const monthStr of targetMonths) {
+      const existing = await pb.collection('transactions').getFullList({
+        filter: `user='${userId}' && source='importado' && month='${monthStr}'`,
+      })
+      for (const tx of existing) {
+        try {
+          await pb.collection('transactions').delete(tx.id)
+          transactionsDeleted++
+        } catch (e) {
+          console.error('Erro ao deletar transação antiga:', e)
+        }
+      }
+    }
+  }
+
+  // 4. Build historical transactions to insert
+  const toInsert: Array<{
+    date: string
+    description: string
+    amount: number
+    category?: string
+    source: 'importado'
+    month: string
+  }> = []
+
+  for (const section of params.sections) {
+    const secNorm = norm(section.name)
+    for (const item of section.items) {
+      const itemNorm = norm(item.name)
+      const subCat = subMap.get(`${secNorm}::${itemNorm}`) || subMap.get(`none::${itemNorm}`)
+
+      Object.entries(item.monthlyValues).forEach(([mIdxStr, val]) => {
+        const mIdx = parseInt(mIdxStr, 10)
+        if (params.monthsToImport.includes(mIdx) && val > 0) {
+          const monthStr = `${params.year}-${String(mIdx).padStart(2, '0')}`
+          const dateStr = `${monthStr}-01`
+
+          toInsert.push({
+            date: dateStr,
+            description: `${item.name} (importado da planilha)`,
+            amount: val, // Saved in EUR (app currency)
+            category: subCat?.id,
+            source: 'importado',
+            month: monthStr,
+          })
+        }
+      })
+    }
+  }
+
+  // 5. Batch insert transactions
+  const transactionsCreated = await createTransactionsBatch(toInsert)
+
+  return {
+    mainCategoriesCreated,
+    subCategoriesCreated,
+    categoriesUpdated,
+    transactionsCreated,
+    transactionsDeleted,
+  }
+}
+
 export async function clearAndSaveAlerts(
   alertsList: Array<{
     severity: 'critical' | 'warning' | 'info'

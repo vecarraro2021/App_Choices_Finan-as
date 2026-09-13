@@ -49,6 +49,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import PlanningImporter from '@/components/PlanningImporter'
+import { useNavigate } from 'react-router-dom'
 
 interface PreviewTransaction {
   id: string
@@ -62,6 +65,7 @@ interface PreviewTransaction {
 export default function TransactionsView() {
   const { user, currency } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   const [categories, setCategories] = useState<Category[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -406,8 +410,8 @@ export default function TransactionsView() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Extratos & Faturas</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Importe seus arquivos CSV/XLSX de cartões e contas ou adicione despesas avulsas
-            manualmente.
+            Importe extratos mensais ou o histórico da planilha de planejamento para alimentar seus
+            relatórios.
           </p>
         </div>
 
@@ -426,7 +430,7 @@ export default function TransactionsView() {
             className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
           >
             <UploadCloud className="mr-2 h-4 w-4" />
-            Fazer Upload de Extrato
+            Upload de Extrato
           </Button>
           <input
             ref={fileInputRef}
@@ -438,26 +442,60 @@ export default function TransactionsView() {
         </div>
       </div>
 
-      {/* Drag & Drop Zone */}
-      <div
-        onClick={() => fileInputRef.current?.click()}
-        className="group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20"
-      >
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform">
-          <FileSpreadsheet className="h-6 w-6" />
-        </div>
-        <h3 className="mt-3 text-sm font-bold text-slate-900">
-          Clique ou arraste seu extrato bancário (CSV / TXT)
-        </h3>
-        <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-          Processado com inteligência de categorização no seu navegador antes de gravar com
-          segurança no Skip Cloud.
-        </p>
-        <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600">
-          Suporta Nubank, Itaú, Bradesco, Millennium BCP, Santander, C6 e outros
-          <ArrowRight className="h-3 w-3" />
-        </div>
-      </div>
+      {/* Tabs for choosing Importer mode */}
+      <Tabs defaultValue="planning" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 max-w-xl bg-slate-100 p-1">
+          <TabsTrigger
+            value="planning"
+            className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-xs"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+            Planilha de Planejamento (Histórico Jan–Ago)
+          </TabsTrigger>
+          <TabsTrigger
+            value="statement"
+            className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-xs"
+          >
+            <UploadCloud className="h-3.5 w-3.5 mr-1.5 text-blue-600" />
+            Extratos & Faturas (Mapeamento de Colunas)
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Tab 1: Planning Sheet Importer */}
+        <TabsContent value="planning" className="pt-3">
+          <PlanningImporter
+            onSuccess={() => {
+              loadCategories()
+              loadTransactionsList()
+            }}
+            onNavigateToBudgetVsActual={() => navigate('/orcado-vs-realizado')}
+            onNavigateToOverview={() => navigate('/')}
+          />
+        </TabsContent>
+
+        {/* Tab 2: Standard Statement Importer */}
+        <TabsContent value="statement" className="pt-3">
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20"
+          >
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform">
+              <FileSpreadsheet className="h-6 w-6" />
+            </div>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">
+              Clique ou arraste seu extrato bancário (CSV / TXT)
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              Processado com inteligência de categorização no seu navegador antes de gravar com
+              segurança no Skip Cloud.
+            </p>
+            <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600">
+              Suporta Nubank, Itaú, Bradesco, Millennium BCP, Santander, C6 e outros
+              <ArrowRight className="h-3 w-3" />
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Filters Bar */}
       <Card className="border-slate-200 shadow-xs">
