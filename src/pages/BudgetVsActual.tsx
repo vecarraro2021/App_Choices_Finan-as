@@ -25,6 +25,9 @@ import {
   Sliders,
   DollarSign,
   TrendingDown,
+  GripVertical,
+  MoveRight,
+  CornerDownRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { CategorySelectCombobox } from '@/components/CategorySelectCombobox'
 
 export default function BudgetVsActualView() {
   const { user, currency } = useAuth()
@@ -50,6 +54,15 @@ export default function BudgetVsActualView() {
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
+
+  // Drag and Drop state
+  const [draggedSubId, setDraggedSubId] = useState<string | null>(null)
+  const [dragOverMainId, setDragOverMainId] = useState<string | null>(null)
+
+  // Move Subcategory Modal (Mobile / Accessibility / Action button)
+  const [movingSubCategory, setMovingSubCategory] = useState<Category | null>(null)
+  const [targetParentId, setTargetParentId] = useState<string>('')
+  const [moving, setMoving] = useState(false)
 
   // Modal to edit estimated budget
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
@@ -222,6 +235,118 @@ export default function BudgetVsActualView() {
     }))
   }
 
+  // Move subcategory function (identical semantics to Categories.tsx)
+  const handleMoveSubCategory = async (subCatId: string, newParentId: string) => {
+    const subToMove = categories.find((c) => c.id === subCatId)
+    if (!subToMove || subToMove.parent === newParentId) {
+      return
+    }
+
+    const targetParent = categories.find((c) => c.id === newParentId && c.type === 'main')
+    if (!targetParent) {
+      toast({ title: 'Categoria de destino inválida', variant: 'destructive' })
+      return
+    }
+
+    // Optimistic UI update
+    const previousCategories = [...categories]
+    setCategories((prev) =>
+      prev.map((c) =>
+        c.id === subCatId ? { ...c, parent: newParentId, color: targetParent.color || c.color } : c,
+      ),
+    )
+
+    // Automatically expand target parent so user sees the moved item immediately in the matrix
+    setExpandedCategories((prev) => ({ ...prev, [newParentId]: true }))
+
+    try {
+      await updateCategory(subCatId, {
+        parent: newParentId,
+        color: targetParent.color || undefined,
+      })
+
+      toast({
+        title: 'Subcategoria movida!',
+        description: `"${subToMove.name}" agora pertence a "${targetParent.name}".`,
+      })
+    } catch (err) {
+      console.error('Erro ao mover subcategoria:', err)
+      // Rollback optimistic update
+      setCategories(previousCategories)
+      toast({
+        title: 'Erro ao mover subcategoria',
+        description: 'Não foi possível atualizar no servidor.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, subId: string) => {
+    e.dataTransfer.setData('text/plain', subId)
+    e.dataTransfer.setData('application/json', JSON.stringify({ id: subId }))
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedSubId(subId)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedSubId(null)
+    setDragOverMainId(null)
+  }
+
+  const handleDragOverMain = (e: React.DragEvent, mainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverMainId !== mainId) {
+      setDragOverMainId(mainId)
+    }
+  }
+
+  const handleDragLeaveMain = (e: React.DragEvent, mainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget as Node)) {
+      return
+    }
+    if (dragOverMainId === mainId) {
+      setDragOverMainId(null)
+    }
+  }
+
+  const handleDropOnMain = async (e: React.DragEvent, targetMainId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverMainId(null)
+
+    const subId = e.dataTransfer.getData('text/plain') || draggedSubId
+    setDraggedSubId(null)
+
+    if (!subId) return
+    await handleMoveSubCategory(subId, targetMainId)
+  }
+
+  // Open Move Dialog (Mobile / Actions / Accessibility)
+  const handleOpenMove = (sub: Category) => {
+    setMovingSubCategory(sub)
+    const currentParentId = sub.parent
+    const otherMain = categories.find((m) => m.type === 'main' && m.id !== currentParentId)
+    setTargetParentId(otherMain ? otherMain.id : '')
+  }
+
+  const handleConfirmMove = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!movingSubCategory || !targetParentId) return
+
+    setMoving(true)
+    try {
+      await handleMoveSubCategory(movingSubCategory.id, targetParentId)
+      setMovingSubCategory(null)
+    } finally {
+      setMoving(false)
+    }
+  }
+
   // Open Edit Estimate Modal
   const handleOpenEstimateModal = (cat: Category) => {
     setEditingCategory(cat)
@@ -390,8 +515,14 @@ export default function BudgetVsActualView() {
             <CardTitle className="text-base font-bold text-slate-900">
               Matriz Orçamentária por Categoria e Mês
             </CardTitle>
-            <CardDescription className="text-xs">
-              Valores em formato Real / Orçado. Células vermelhas indicam estouro orçamentário.
+            <CardDescription className="text-xs flex flex-wrap items-center gap-1.5 mt-0.5">
+              <span>
+                Valores em formato Real / Orçado. Células vermelhas indicam estouro orçamentário.
+              </span>
+              <span className="hidden sm:inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-medium text-[11px] border border-blue-100">
+                <GripVertical className="h-3 w-3" /> Arraste subcategorias entre categorias para
+                reorganizar
+              </span>
             </CardDescription>
           </div>
         </CardHeader>
@@ -422,40 +553,68 @@ export default function BudgetVsActualView() {
                 {matrixData.rows.map((row) => {
                   const isExpanded = !!expandedCategories[row.id]
                   const hasSub = row.subcategories.length > 0
+                  const isDropTarget = dragOverMainId === row.id
+                  const isCurrentParentOfDragged =
+                    draggedSubId && row.subcategories.some((s) => s.id === draggedSubId)
 
                   return (
                     <React.Fragment key={row.id}>
                       {/* Main Category Row */}
-                      <tr className="hover:bg-slate-50/70 transition-colors font-medium">
-                        <td className="py-3 px-4 sticky left-0 bg-white z-10 shadow-xs flex items-center justify-between gap-2">
-                          <div
-                            className="flex items-center gap-2 cursor-pointer select-none"
-                            onClick={() => hasSub && toggleExpand(row.id)}
-                          >
-                            {hasSub ? (
-                              isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                      <tr
+                        onDragOver={(e) => handleDragOverMain(e, row.id)}
+                        onDragLeave={(e) => handleDragLeaveMain(e, row.id)}
+                        onDrop={(e) => handleDropOnMain(e, row.id)}
+                        className={`transition-colors font-medium ${
+                          isDropTarget
+                            ? 'bg-blue-100/70 ring-2 ring-inset ring-blue-400'
+                            : 'hover:bg-slate-50/70'
+                        }`}
+                      >
+                        <td
+                          className={`py-3 px-4 sticky left-0 z-10 shadow-xs transition-colors ${
+                            isDropTarget ? 'bg-blue-100/90' : 'bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div
+                              className="flex items-center gap-2 cursor-pointer select-none min-w-0"
+                              onClick={() => hasSub && toggleExpand(row.id)}
+                            >
+                              {hasSub ? (
+                                isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                                )
                               ) : (
-                                <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
-                              )
-                            ) : (
-                              <div className="w-4" />
-                            )}
-                            <span className="font-bold text-slate-900">{row.name}</span>
-                          </div>
+                                <div className="w-4 shrink-0" />
+                              )}
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: row.color || '#2563EB' }}
+                              />
+                              <span className="font-bold text-slate-900 truncate">{row.name}</span>
 
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-slate-400 hover:text-blue-600"
-                            onClick={() => {
-                              const found = categories.find((c) => c.id === row.id)
-                              if (found) handleOpenEstimateModal(found)
-                            }}
-                            title="Editar orçamento estimado desta categoria"
-                          >
-                            <Edit className="h-3 w-3" />
-                          </Button>
+                              {isDropTarget && !isCurrentParentOfDragged && (
+                                <span className="text-[11px] font-semibold text-blue-700 bg-blue-200/80 px-2 py-0.5 rounded-md inline-flex items-center gap-1 animate-pulse shrink-0">
+                                  <CornerDownRight className="h-3 w-3" /> Solte aqui para mover
+                                </span>
+                              )}
+                            </div>
+
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-slate-400 hover:text-blue-600 shrink-0"
+                              onClick={() => {
+                                const found = categories.find((c) => c.id === row.id)
+                                if (found) handleOpenEstimateModal(found)
+                              }}
+                              title="Editar orçamento estimado desta categoria"
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </td>
 
                         <td className="py-3 px-3 text-right tabular-nums text-slate-500 whitespace-nowrap">
@@ -531,70 +690,116 @@ export default function BudgetVsActualView() {
 
                       {/* Subcategories (when expanded) */}
                       {isExpanded &&
-                        row.subcategories.map((sub) => (
-                          <tr
-                            key={sub.id}
-                            className="bg-slate-50/40 text-slate-600 hover:bg-slate-100/50 transition-colors"
-                          >
-                            <td className="py-2.5 px-4 pl-9 sticky left-0 bg-slate-50 z-10 shadow-xs flex items-center justify-between">
-                              <span className="text-slate-700 text-xs">↳ {sub.name}</span>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-5 w-5 text-slate-400 hover:text-blue-600"
-                                onClick={() => {
-                                  const found = categories.find((c) => c.id === sub.id)
-                                  if (found) handleOpenEstimateModal(found)
-                                }}
+                        row.subcategories.map((sub) => {
+                          const isBeingDragged = draggedSubId === sub.id
+                          const foundSub = categories.find((c) => c.id === sub.id)
+
+                          return (
+                            <tr
+                              key={sub.id}
+                              className={`transition-colors ${
+                                isBeingDragged
+                                  ? 'opacity-40 bg-blue-50/80 border-y border-dashed border-blue-400'
+                                  : 'bg-slate-50/40 text-slate-600 hover:bg-slate-100/50'
+                              }`}
+                            >
+                              <td
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, sub.id)}
+                                onDragEnd={handleDragEnd}
+                                className={`py-2.5 px-4 pl-6 sticky left-0 z-10 shadow-xs cursor-grab active:cursor-grabbing group transition-colors ${
+                                  isBeingDragged ? 'bg-blue-50/90' : 'bg-slate-50'
+                                }`}
+                                title="Arraste para mover para outra categoria"
                               >
-                                <Edit className="h-2.5 w-2.5" />
-                              </Button>
-                            </td>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <div
+                                      className="text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing shrink-0 transition-colors"
+                                      title="Clique e arraste para mover para outra categoria"
+                                    >
+                                      <GripVertical className="h-3.5 w-3.5" />
+                                    </div>
+                                    <span className="text-slate-400 shrink-0 text-xs">↳</span>
+                                    <span className="text-slate-700 text-xs truncate font-medium">
+                                      {sub.name}
+                                    </span>
+                                  </div>
 
-                            <td className="py-2.5 px-3 text-right tabular-nums text-slate-400 text-xs">
-                              <InlineEstimateCell
-                                value={sub.estimatedMonthly}
-                                currency={currency}
-                                rate={getRateForMonth(undefined, exchangeRates)}
-                                categoryId={sub.id}
-                                categoryName={row.name}
-                                subCategoryName={sub.name}
-                                onSave={(val) => handleInlineSaveEstimate(sub.id, val)}
-                                emptyLabel="-"
-                                className="text-slate-500"
-                              />
-                            </td>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 text-slate-400 hover:text-blue-600"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (foundSub) handleOpenMove(foundSub)
+                                      }}
+                                      title="Mover para outra categoria..."
+                                    >
+                                      <MoveRight className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 text-slate-400 hover:text-blue-600"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (foundSub) handleOpenEstimateModal(foundSub)
+                                      }}
+                                      title="Editar orçamento estimado desta subcategoria"
+                                    >
+                                      <Edit className="h-2.5 w-2.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </td>
 
-                            {activeMonths.map((m) => {
-                              const sCell = sub.monthly[m]
-                              const sAct = sCell?.actual || 0
-                              const sRate = getRateForMonth(m, exchangeRates)
-                              return (
-                                <td
-                                  key={m}
-                                  className="py-2.5 px-2 text-center tabular-nums text-xs text-slate-600"
-                                >
-                                  <InlineActualCell
-                                    value={sAct}
-                                    currency={currency}
-                                    rate={sRate}
-                                    month={m}
-                                    categoryId={row.id}
-                                    categoryName={row.name}
-                                    subCategoryId={sub.id}
-                                    subCategoryName={sub.name}
-                                    onCreateAdjustmentTx={handleCreateAdjustmentTx}
-                                    onAdjustmentCreated={loadData}
-                                  />
-                                </td>
-                              )
-                            })}
+                              <td className="py-2.5 px-3 text-right tabular-nums text-slate-400 text-xs">
+                                <InlineEstimateCell
+                                  value={sub.estimatedMonthly}
+                                  currency={currency}
+                                  rate={getRateForMonth(undefined, exchangeRates)}
+                                  categoryId={sub.id}
+                                  categoryName={row.name}
+                                  subCategoryName={sub.name}
+                                  onSave={(val) => handleInlineSaveEstimate(sub.id, val)}
+                                  emptyLabel="-"
+                                  className="text-slate-500"
+                                />
+                              </td>
 
-                            <td className="py-2.5 px-4 text-right tabular-nums font-semibold text-slate-700 text-xs">
-                              {formatCurrency(sub.totalActual, currency)}
-                            </td>
-                          </tr>
-                        ))}
+                              {activeMonths.map((m) => {
+                                const sCell = sub.monthly[m]
+                                const sAct = sCell?.actual || 0
+                                const sRate = getRateForMonth(m, exchangeRates)
+                                return (
+                                  <td
+                                    key={m}
+                                    className="py-2.5 px-2 text-center tabular-nums text-xs text-slate-600"
+                                  >
+                                    <InlineActualCell
+                                      value={sAct}
+                                      currency={currency}
+                                      rate={sRate}
+                                      month={m}
+                                      categoryId={row.id}
+                                      categoryName={row.name}
+                                      subCategoryId={sub.id}
+                                      subCategoryName={sub.name}
+                                      onCreateAdjustmentTx={handleCreateAdjustmentTx}
+                                      onAdjustmentCreated={loadData}
+                                    />
+                                  </td>
+                                )
+                              })}
+
+                              <td className="py-2.5 px-4 text-right tabular-nums font-semibold text-slate-700 text-xs">
+                                {formatCurrency(sub.totalActual, currency)}
+                              </td>
+                            </tr>
+                          )
+                        })}
                     </React.Fragment>
                   )
                 })}
@@ -662,6 +867,53 @@ export default function BudgetVsActualView() {
           </p>
         </div>
       </Card>
+
+      {/* MOVE SUBCATEGORY MODAL (Mobile / Accessible Alternative) */}
+      <Dialog
+        open={!!movingSubCategory}
+        onOpenChange={(open) => !open && setMovingSubCategory(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MoveRight className="h-5 w-5 text-blue-600" />
+              Mover Subcategoria
+            </DialogTitle>
+            <DialogDescription>
+              Altere a categoria mãe de <strong>{movingSubCategory?.name}</strong> para reorganizar
+              a matriz orçamentária.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmMove} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Nova Categoria Principal</Label>
+              <CategorySelectCombobox
+                categories={categories.filter((c) => c.type === 'main')}
+                value={targetParentId}
+                onChange={setTargetParentId}
+                excludeCategoryId={movingSubCategory?.parent}
+                placeholder="Selecione a categoria principal de destino"
+                searchPlaceholder="Buscar categoria principal..."
+                emptyText="Nenhuma categoria encontrada."
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setMovingSubCategory(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={moving || !targetParentId || targetParentId === movingSubCategory?.parent}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {moving ? 'Movendo...' : 'Mover Subcategoria'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* EDIT ESTIMATE MODAL */}
       <Dialog open={!!editingCategory} onOpenChange={(open) => !open && setEditingCategory(null)}>
