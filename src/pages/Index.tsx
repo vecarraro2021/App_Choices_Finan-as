@@ -106,17 +106,20 @@ export default function Index() {
       if (m) monthsSet.add(m)
     })
 
-    const monthsCount = Math.max(monthsSet.size, 1)
-    const monthlyAverage = totalSpending / monthsCount
+    const hasTransactions = transactions.length > 0
+    const monthsCount = hasTransactions ? Math.max(monthsSet.size, 1) : 0
+    const monthlyAverage = monthsCount > 0 ? totalSpending / monthsCount : 0
 
     // Sum monthly budget for all main categories
     const monthlyBudget = categories
       .filter((c) => c.type === 'main')
       .reduce((acc, c) => acc + (Number(c.estimated) || 0), 0)
 
-    const totalBudget = monthlyBudget * monthsCount
+    // If transactions exist, multiply by months count, otherwise by 1 month reference
+    const totalBudget = hasTransactions ? monthlyBudget * monthsCount : monthlyBudget
     const overBudget = totalSpending - totalBudget
     const overBudgetPct = totalBudget > 0 ? overBudget / totalBudget : 0
+    const isZeroState = totalSpending === 0 && totalBudget === 0
 
     // Find highest spending month
     const spendingByMonth: Record<string, number> = {}
@@ -140,6 +143,8 @@ export default function Index() {
       totalBudget,
       overBudget,
       overBudgetPct,
+      isZeroState,
+      hasTransactions,
       highestMonth,
       highestAmount,
       monthsCount,
@@ -304,8 +309,9 @@ export default function Index() {
               <CountUp value={metrics.totalSpending} currency={currency} />
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              {metrics.monthsCount}{' '}
-              {metrics.monthsCount === 1 ? 'mês analisado' : 'meses analisados'}
+              {metrics.hasTransactions
+                ? `${metrics.monthsCount} ${metrics.monthsCount === 1 ? 'mês analisado' : 'meses analisados'}`
+                : 'Nenhum mês analisado'}
             </p>
           </CardContent>
         </Card>
@@ -354,10 +360,16 @@ export default function Index() {
             </CardTitle>
             <div
               className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                metrics.overBudget > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                metrics.isZeroState
+                  ? 'bg-slate-100 text-slate-400'
+                  : metrics.overBudget > 0
+                    ? 'bg-red-50 text-red-600'
+                    : 'bg-emerald-50 text-emerald-600'
               }`}
             >
-              {metrics.overBudget > 0 ? (
+              {metrics.isZeroState ? (
+                <Layers className="h-4 w-4" />
+              ) : metrics.overBudget > 0 ? (
                 <AlertTriangle className="h-4 w-4" />
               ) : (
                 <TrendingUp className="h-4 w-4" />
@@ -365,23 +377,32 @@ export default function Index() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2">
-              <div
-                className={`text-2xl font-bold tracking-tight ${
-                  metrics.overBudget > 0 ? 'text-red-600' : 'text-emerald-600'
-                }`}
-              >
-                <CountUp value={Math.abs(metrics.overBudget)} currency={currency} />
-              </div>
-              {metrics.overBudget > 0 && (
-                <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">
-                  +{formatPercent(metrics.overBudgetPct)}
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              {metrics.overBudget > 0 ? 'Acima do planejado' : 'Dentro do orçamento'}
-            </p>
+            {metrics.isZeroState ? (
+              <>
+                <div className="text-2xl font-bold tracking-tight text-slate-400">—</div>
+                <p className="text-xs text-slate-500 mt-1">Sem dados ainda</p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`text-2xl font-bold tracking-tight ${
+                      metrics.overBudget > 0 ? 'text-red-600' : 'text-emerald-600'
+                    }`}
+                  >
+                    <CountUp value={Math.abs(metrics.overBudget)} currency={currency} />
+                  </div>
+                  {metrics.overBudget > 0 && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">
+                      +{formatPercent(metrics.overBudgetPct)}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  {metrics.overBudget > 0 ? 'Acima do planejado' : 'Dentro do orçamento'}
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -443,8 +464,25 @@ export default function Index() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="flex h-[280px] items-center justify-center text-xs text-slate-400">
-                Sem dados mensais para exibir o comparativo.
+              <div className="flex flex-col h-[280px] items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+                <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5">
+                  <TrendingDown className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-semibold text-slate-800">
+                  Sem dados mensais para exibir
+                </p>
+                <p className="text-xs text-slate-500 max-w-xs mt-1 mb-4">
+                  Importe seus extratos para visualizar o comparativo mensal de Real vs. Orçado.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate('/extratos')}
+                  className="text-xs border-slate-300"
+                >
+                  <UploadCloud className="mr-1.5 h-3.5 w-3.5" />
+                  Importar Extratos
+                </Button>
               </div>
             )}
           </CardContent>
@@ -511,8 +549,23 @@ export default function Index() {
                 </div>
               </div>
             ) : (
-              <div className="flex h-[260px] items-center justify-center text-xs text-slate-400">
-                Sem transações categorizadas.
+              <div className="flex flex-col h-[280px] items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+                <div className="h-10 w-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mb-2.5">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-semibold text-slate-800">Sem transações categorizadas</p>
+                <p className="text-xs text-slate-500 max-w-xs mt-1 mb-4">
+                  A rosca de categorias será preenchida conforme suas despesas forem importadas e
+                  classificadas.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate('/categorias')}
+                  className="text-xs border-slate-300"
+                >
+                  Ver Categorias
+                </Button>
               </div>
             )}
           </CardContent>
