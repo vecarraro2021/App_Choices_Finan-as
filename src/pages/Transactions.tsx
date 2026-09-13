@@ -15,10 +15,13 @@ import { suggestCategory } from '@/lib/categorizer'
 import { parseCSV, parseAmount, normalizeDate, ParsedRow } from '@/lib/fileParser'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { Transaction, Category, ExchangeRate } from '@/types/finance'
+import { extractTextFromPDF } from '@/lib/pdfExtractor'
+import { parsePDFStatement, PDFParsedTransaction } from '@/lib/pdfStatementParser'
 import { useToast } from '@/hooks/use-toast'
 import {
   UploadCloud,
   FileSpreadsheet,
+  FileText,
   Plus,
   Trash2,
   Edit2,
@@ -30,6 +33,9 @@ import {
   AlertCircle,
   ArrowRight,
   Sparkles,
+  Loader2,
+  CheckSquare,
+  Square,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,9 +65,12 @@ interface PreviewTransaction {
   id: string
   date: string
   description: string
-  amount: number
+  amount: number // Em BRL (convertido se EUR)
+  originalAmount?: number
+  originalCurrency?: 'BRL' | 'EUR'
   category?: string
   month: string
+  selected?: boolean
 }
 
 export default function TransactionsView() {
@@ -90,6 +99,14 @@ export default function TransactionsView() {
   const [descCol, setDescCol] = useState('')
   const [amountCol, setAmountCol] = useState('')
   const [categoryCol, setCategoryCol] = useState('')
+  const [importFileType, setImportFileType] = useState<'csv' | 'pdf'>('csv')
+  const [isProcessingFile, setIsProcessingFile] = useState(false)
+  const [pdfMeta, setPdfMeta] = useState<{
+    fileName: string
+    currency: 'BRL' | 'EUR'
+    year?: number
+    totalPages: number
+  } | null>(null)
   const [previewList, setPreviewList] = useState<PreviewTransaction[]>([])
   const [showPreviewDialog, setShowPreviewDialog] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -171,12 +188,109 @@ export default function TransactionsView() {
     return list
   }, [])
 
-  // Handle file select (CSV or text)
+  // Processamento de arquivo PDF (client-side)
+  const processPdfFile = async (file: File) => {
+    try {
+      setIsProcessingFile(true)
+      const extracted = await extractTextFromPDF(file)
+
+      if (!extracted.fullText || extracted.fullText.trim().length === 0) {
+        toast({
+          title: 'Não foi possível identificar transações neste PDF',
+          description:
+            'O arquivo pode ser protegido por senha, digitalizado como imagem sem camada de texto pesquisável ou estar em branco.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Reunir todas as linhas de todas as páginas
+      const allLines = extracted.pages.flatMap((p) => p.lines)
+      const parseResult = parsePDFStatement(allLines, extracted.fullText)
+
+      if (parseResult.transactions.length === 0) {
+        toast({
+          title: 'Não foi possível identificar transações neste PDF',
+          description:
+            parseResult.reason ||
+            'Não foram reconhecidas linhas com data, descrição e valor válidos nos padrões comuns de extratos ou faturas.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      setImportFileType('pdf')
+      setPdfMeta({
+        fileName: file.name,
+        currency: parseResult.detectedCurrency || 'BRL',
+        year: parseResult.detectedYear,
+        totalPages: extracted.totalPages,
+      })
+
+      // Converter transações detectadas para o modelo PreviewTransaction
+      // Aplicando conversão cambial se moeda for EUR e categorização automática inteligente
+      const preview: PreviewTransaction[] = parseResult.transactions.map((tx, idx) => {
+        const assignedCat = suggestCategory(tx.description, categories)
+        const rateUsed = getRateForMonth(tx.month, exchangeRates)
+
+        // Se o PDF foi emitido em EUR, converte para BRL usando a taxa do mês
+        let amountBrl = tx.amount
+        if (tx.currency === 'EUR') {
+          amountBrl = Math.round(tx.amount * rateUsed * 100) / 100
+        }
+
+        return {
+          id: `pdf-preview-${idx}`,
+          date: tx.date,
+          description: tx.description,
+          amount: amountBrl,
+          originalAmount: tx.amount,
+          originalCurrency: tx.currency,
+          category: assignedCat,
+          month: tx.month,
+          selected: true,
+        }
+      })
+
+      setPreviewList(preview)
+      setShowPreviewDialog(true)
+
+      toast({
+        title: 'Extrato PDF processado!',
+        description: `${parseResult.transactions.length} transações identificadas em ${extracted.totalPages} página(s).`,
+      })
+    } catch (err: any) {
+      console.error('Erro na extração de PDF:', err)
+      toast({
+        title: 'Falha ao ler arquivo PDF',
+        description:
+          err.message ||
+          'Não foi possível extrair o texto deste PDF no seu navegador. Verifique se o arquivo não está corrompido.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsProcessingFile(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // Handle file select (CSV, TXT ou PDF)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
+    if (isPdf) {
+      await processPdfFile(file)
+      return
+    }
+
     try {
+      setIsProcessingFile(true)
+      setImportFileType('csv')
+      setPdfMeta(null)
+
       const text = await file.text()
       const parsed = parseCSV(text)
 
@@ -229,10 +343,11 @@ export default function TransactionsView() {
       console.error(err)
       toast({
         title: 'Erro ao processar arquivo',
-        description: 'Verifique se o arquivo é um CSV ou exportação de extrato válida.',
+        description: 'Verifique se o arquivo é um CSV, XLSX ou extrato válido.',
         variant: 'destructive',
       })
     } finally {
+      setIsProcessingFile(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -270,6 +385,7 @@ export default function TransactionsView() {
         amount: amt,
         category: assignedCat,
         month,
+        selected: true,
       }
     })
 
@@ -283,15 +399,23 @@ export default function TransactionsView() {
 
   // Save imported transactions
   const handleConfirmImport = async () => {
-    if (previewList.length === 0) return
+    const itemsToSave = previewList.filter((item) => item.selected !== false)
+    if (itemsToSave.length === 0) {
+      toast({
+        title: 'Nenhuma transação selecionada',
+        description: 'Selecione pelo menos uma transação para salvar.',
+        variant: 'destructive',
+      })
+      return
+    }
     setIsImporting(true)
 
     try {
-      const toInsert = previewList.map((item) => ({
+      const toInsert = itemsToSave.map((item) => ({
         date: item.date,
         description: item.description,
         amount: item.amount,
-        category: item.category,
+        category: item.category || undefined,
         source: 'importado' as const,
         month: item.month,
       }))
@@ -431,15 +555,25 @@ export default function TransactionsView() {
 
           <Button
             onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessingFile}
             className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
           >
-            <UploadCloud className="mr-2 h-4 w-4" />
-            Upload de Extrato
+            {isProcessingFile ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Lendo Arquivo...
+              </>
+            ) : (
+              <>
+                <UploadCloud className="mr-2 h-4 w-4" />
+                Upload de Extrato / PDF
+              </>
+            )}
           </Button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.txt,.tsv"
+            accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -477,24 +611,56 @@ export default function TransactionsView() {
           />
         </TabsContent>
 
-        {/* Tab 2: Standard Statement Importer */}
+        {/* Tab 2: Standard Statement Importer (CSV, XLSX, PDF) */}
         <TabsContent value="statement" className="pt-3">
           <div
-            onClick={() => fileInputRef.current?.click()}
-            className="group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20"
+            onClick={() => !isProcessingFile && fileInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              const file = e.dataTransfer.files?.[0]
+              if (file) {
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                  processPdfFile(file)
+                } else {
+                  // CSV / TXT / XLS
+                  const dt = new DataTransfer()
+                  dt.items.add(file)
+                  if (fileInputRef.current) {
+                    fileInputRef.current.files = dt.files
+                    fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }))
+                  }
+                }
+              }
+            }}
+            className={`group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20 ${
+              isProcessingFile ? 'opacity-60 cursor-not-allowed' : ''
+            }`}
           >
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform">
-              <FileSpreadsheet className="h-6 w-6" />
+              {isProcessingFile ? (
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              ) : (
+                <div className="flex items-center -space-x-1.5">
+                  <FileText className="h-6 w-6 text-red-500" />
+                  <FileSpreadsheet className="h-6 w-6 text-blue-600" />
+                </div>
+              )}
             </div>
             <h3 className="mt-3 text-sm font-bold text-slate-900">
-              Clique ou arraste seu extrato bancário (CSV / TXT)
+              {isProcessingFile
+                ? 'Processando documento no navegador...'
+                : 'Clique ou arraste seu extrato bancário ou fatura (CSV, XLSX ou PDF)'}
             </h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              Processado com inteligência de categorização no seu navegador antes de gravar com
-              segurança no Skip Cloud.
+            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+              Extração 100% no seu navegador com detecção de valores, datas, descrições e câmbio
+              mensal automático.
             </p>
-            <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600">
-              Suporta Nubank, Itaú, Bradesco, Millennium BCP, Santander, C6 e outros
+            <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-blue-600 flex-wrap justify-center">
+              <span>
+                PDFs de cartões & contas: Nubank, Itaú, Bradesco, Millennium BCP, CGD, Santander,
+                Inter e C6
+              </span>
               <ArrowRight className="h-3 w-3" />
             </div>
           </div>
@@ -728,122 +894,167 @@ export default function TransactionsView() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-blue-600" />
-              Mapeamento de Colunas e Pré-visualização
+              {importFileType === 'pdf'
+                ? 'Revisão do Extrato PDF Extraído'
+                : 'Mapeamento de Colunas e Pré-visualização'}
             </DialogTitle>
             <DialogDescription>
-              Confirme qual coluna corresponde a cada dado e revise as categorias sugeridas antes de
-              salvar.
+              {importFileType === 'pdf'
+                ? 'Revise os lançamentos identificados no PDF, ajuste categorias e desmarque os que não desejar incluir.'
+                : 'Confirme qual coluna corresponde a cada dado e revise as categorias sugeridas antes de salvar.'}
             </DialogDescription>
           </DialogHeader>
 
-          {/* Column selector form */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-            <div>
-              <Label className="text-[11px] font-semibold text-slate-600">Coluna de Data</Label>
-              <Select
-                value={dateCol}
-                onValueChange={(v) => {
-                  setDateCol(v)
-                }}
-              >
-                <SelectTrigger className="h-8 mt-1 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {uploadedHeaders.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {/* Banner específico para importação de PDF */}
+          {importFileType === 'pdf' && pdfMeta && (
+            <div className="p-3 bg-blue-50/80 rounded-lg border border-blue-200 text-xs text-blue-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+                <span>
+                  Arquivo: <strong>{pdfMeta.fileName}</strong> ({pdfMeta.totalPages} página(s))
+                  {pdfMeta.year && ` • Ano: ${pdfMeta.year}`}
+                  {pdfMeta.currency === 'EUR' && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 bg-amber-50 text-amber-800 border-amber-200 text-[10px]"
+                    >
+                      Valores em EUR convertidos para R$ pela taxa média de cada mês
+                    </Badge>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected = previewList.every((it) => it.selected !== false)
+                    setPreviewList(previewList.map((it) => ({ ...it, selected: !allSelected })))
+                  }}
+                  className="font-semibold text-blue-700 hover:underline"
+                >
+                  {previewList.every((it) => it.selected !== false)
+                    ? 'Desmarcar todos'
+                    : 'Marcar todos'}
+                </button>
+              </div>
             </div>
+          )}
 
-            <div>
-              <Label className="text-[11px] font-semibold text-slate-600">
-                Coluna de Descrição
-              </Label>
-              <Select
-                value={descCol}
-                onValueChange={(v) => {
-                  setDescCol(v)
-                }}
-              >
-                <SelectTrigger className="h-8 mt-1 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {uploadedHeaders.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Column selector form (apenas para CSV) */}
+          {importFileType === 'csv' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600">Coluna de Data</Label>
+                <Select
+                  value={dateCol}
+                  onValueChange={(v) => {
+                    setDateCol(v)
+                  }}
+                >
+                  <SelectTrigger className="h-8 mt-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uploadedHeaders.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div>
-              <Label className="text-[11px] font-semibold text-slate-600">Coluna de Valor</Label>
-              <Select
-                value={amountCol}
-                onValueChange={(v) => {
-                  setAmountCol(v)
-                }}
-              >
-                <SelectTrigger className="h-8 mt-1 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {uploadedHeaders.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600">
+                  Coluna de Descrição
+                </Label>
+                <Select
+                  value={descCol}
+                  onValueChange={(v) => {
+                    setDescCol(v)
+                  }}
+                >
+                  <SelectTrigger className="h-8 mt-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uploadedHeaders.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div>
-              <Label className="text-[11px] font-semibold text-slate-600">
-                Coluna de Categoria (Opcional)
-              </Label>
-              <Select
-                value={categoryCol}
-                onValueChange={(v) => {
-                  setCategoryCol(v)
-                }}
-              >
-                <SelectTrigger className="h-8 mt-1 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Auto-identificar por IA</SelectItem>
-                  {uploadedHeaders.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600">Coluna de Valor</Label>
+                <Select
+                  value={amountCol}
+                  onValueChange={(v) => {
+                    setAmountCol(v)
+                  }}
+                >
+                  <SelectTrigger className="h-8 mt-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uploadedHeaders.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="col-span-2 md:col-span-4 flex justify-end mt-1">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={handleApplyMapping}
-                className="text-xs h-7"
-              >
-                Reaplicar Mapeamento
-              </Button>
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600">
+                  Coluna de Categoria (Opcional)
+                </Label>
+                <Select
+                  value={categoryCol}
+                  onValueChange={(v) => {
+                    setCategoryCol(v)
+                  }}
+                >
+                  <SelectTrigger className="h-8 mt-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Auto-identificar por IA</SelectItem>
+                    {uploadedHeaders.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="col-span-2 md:col-span-4 flex justify-end mt-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleApplyMapping}
+                  className="text-xs h-7"
+                >
+                  Reaplicar Mapeamento
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Preview rows */}
           <div className="flex-1 overflow-y-auto border border-slate-200 rounded-md">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 sticky top-0 font-semibold text-slate-700">
                 <tr>
+                  {importFileType === 'pdf' && (
+                    <th className="py-2 px-3 w-8 text-center">
+                      <span className="sr-only">Selecionar</span>
+                    </th>
+                  )}
                   <th className="py-2 px-3">Data</th>
                   <th className="py-2 px-3">Descrição</th>
                   <th className="py-2 px-3">Categoria Sugerida</th>
@@ -851,44 +1062,81 @@ export default function TransactionsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {previewList.map((row, idx) => (
-                  <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="py-2 px-3 whitespace-nowrap tabular-nums">{row.date}</td>
-                    <td className="py-2 px-3 max-w-[200px] truncate">{row.description}</td>
-                    <td className="py-2 px-3">
-                      <Select
-                        value={row.category || 'none'}
-                        onValueChange={(val) => {
-                          const updated = [...previewList]
-                          updated[idx].category = val === 'none' ? undefined : val
-                          setPreviewList(updated)
-                        }}
-                      >
-                        <SelectTrigger className="h-7 text-xs w-[180px]">
-                          <SelectValue placeholder="Selecione categoria" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-56">
-                          <SelectItem value="none">Não Categorizado</SelectItem>
-                          {categories.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.type === 'sub' ? `↳ ${c.name}` : c.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="py-2 px-3 text-right font-bold text-slate-900 tabular-nums">
-                      {formatCurrency(row.amount, 'BRL')}
-                    </td>
-                  </tr>
-                ))}
+                {previewList.map((row, idx) => {
+                  const isChecked = row.selected !== false
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`hover:bg-slate-50 transition-colors ${
+                        !isChecked ? 'opacity-40 bg-slate-50/50' : ''
+                      }`}
+                    >
+                      {importFileType === 'pdf' && (
+                        <td className="py-2 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const updated = [...previewList]
+                              updated[idx].selected = e.target.checked
+                              setPreviewList(updated)
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
+                      <td className="py-2 px-3 whitespace-nowrap tabular-nums font-medium text-slate-900">
+                        {row.date.split('-').reverse().join('/')}
+                      </td>
+                      <td className="py-2 px-3 max-w-[240px] truncate font-medium text-slate-800">
+                        {row.description}
+                      </td>
+                      <td className="py-2 px-3">
+                        <Select
+                          value={row.category || 'none'}
+                          onValueChange={(val) => {
+                            const updated = [...previewList]
+                            updated[idx].category = val === 'none' ? undefined : val
+                            setPreviewList(updated)
+                          }}
+                        >
+                          <SelectTrigger className="h-7 text-xs w-[190px]">
+                            <SelectValue placeholder="Selecione categoria" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-56">
+                            <SelectItem value="none">Não Categorizado</SelectItem>
+                            {categories.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.type === 'sub' ? `↳ ${c.name}` : c.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="py-2 px-3 text-right font-bold text-slate-900 tabular-nums">
+                        <div>
+                          <span>{formatCurrency(row.amount, 'BRL')}</span>
+                          {row.originalCurrency === 'EUR' && row.originalAmount && (
+                            <span className="block text-[10px] text-slate-400 font-normal">
+                              (orig: € {row.originalAmount.toFixed(2)})
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
 
           <DialogFooter className="flex items-center justify-between mt-3 pt-2 border-t">
             <span className="text-xs text-slate-500 font-medium">
-              Total a importar: <strong>{previewList.length} lançamentos</strong>
+              Total selecionado:{' '}
+              <strong>
+                {previewList.filter((it) => it.selected !== false).length} de {previewList.length}{' '}
+                lançamentos
+              </strong>
             </span>
             <div className="flex gap-2">
               <Button
