@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-13T14:02:56.419Z",
+  "generatedAt": "2026-09-13T14:10:13.808Z",
   "collections": [
     {
       "name": "users",
@@ -491,6 +491,63 @@
       "indexes": [
         "CREATE UNIQUE INDEX idx_exchange_rates_month_user ON exchange_rates (month, user)",
         "CREATE INDEX idx_exchange_rates_month ON exchange_rates (month)"
+      ]
+    },
+    {
+      "name": "category_rules",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && user = @request.auth.id",
+        "view": "@request.auth.id != '' && user = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
+        "update": "@request.auth.id != '' && user = @request.auth.id",
+        "delete": "@request.auth.id != '' && user = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "pattern",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "category",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "categories"
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_catrules_user ON category_rules (user)",
+        "CREATE INDEX idx_catrules_pattern ON category_rules (pattern)"
       ]
     }
   ]

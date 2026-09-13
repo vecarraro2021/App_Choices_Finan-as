@@ -236,31 +236,56 @@ const KEYWORD_MAP: Record<string, string[]> = {
 /**
  * Suggests a category ID given a transaction description.
  */
-export function suggestCategory(description: string, categories: Category[]): string | undefined {
-  if (!description) return undefined
+export interface CategoryMatchResult {
+  categoryId?: string
+  confidence: 'alta' | 'media' | 'nenhuma'
+  matchedBy?: 'direct' | 'keyword'
+}
+
+/**
+ * Detailed suggestion evaluation to differentiate confident matches from uncertain ones.
+ */
+export function evaluateCategoryMatch(
+  description: string,
+  categories: Category[],
+): CategoryMatchResult {
+  if (!description) return { confidence: 'nenhuma' }
   const descLower = description.toLowerCase()
 
-  // 1. Direct subcategory / category name match
+  // 1. Direct subcategory / category name match (high confidence)
   for (const cat of categories) {
-    if (descLower.includes(cat.name.toLowerCase())) {
-      return cat.id
+    const nameLower = cat.name.toLowerCase()
+    // Skip very short or generic names to avoid false positives
+    if (nameLower.length > 3 && descLower.includes(nameLower)) {
+      return { categoryId: cat.id, confidence: 'alta', matchedBy: 'direct' }
     }
   }
 
-  // 2. Keyword rules matching
+  // 2. Keyword rules matching (medium confidence)
   for (const [catNameKey, keywords] of Object.entries(KEYWORD_MAP)) {
     const matched = keywords.some((kw) => descLower.includes(kw))
     if (matched) {
-      // Find category or subcategory with matching name
       const found = categories.find(
         (c) =>
           c.name.toLowerCase().includes(catNameKey.toLowerCase()) ||
           catNameKey.toLowerCase().includes(c.name.toLowerCase()),
       )
       if (found) {
-        return found.id
+        return { categoryId: found.id, confidence: 'media', matchedBy: 'keyword' }
       }
     }
+  }
+
+  return { confidence: 'nenhuma' }
+}
+
+/**
+ * Suggests a category ID given a transaction description.
+ */
+export function suggestCategory(description: string, categories: Category[]): string | undefined {
+  const match = evaluateCategoryMatch(description, categories)
+  if (match.categoryId) {
+    return match.categoryId
   }
 
   // 3. Fallback to "Não Categorizado" or "Extras" if available
