@@ -67,7 +67,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import PlanningImporter from '@/components/PlanningImporter'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 interface PreviewTransaction {
   id: string
@@ -94,9 +94,14 @@ export default function TransactionsView() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
 
+  // Read initial filters from search params (e.g. redirected from BudgetVsActual inline cell)
+  const [searchParams] = useSearchParams()
+  const initialMonth = searchParams.get('month') || 'all'
+  const initialCat = searchParams.get('category') || 'all'
+
   // Filters
-  const [filterMonth, setFilterMonth] = useState<string>('all')
-  const [filterCategory, setFilterCategory] = useState<string>('all')
+  const [filterMonth, setFilterMonth] = useState<string>(initialMonth)
+  const [filterCategory, setFilterCategory] = useState<string>(initialCat)
   const [searchQuery, setSearchQuery] = useState('')
 
   // Upload & Mapping state

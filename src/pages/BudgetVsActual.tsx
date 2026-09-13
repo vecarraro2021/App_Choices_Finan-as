@@ -9,8 +9,10 @@ import {
   upsertMonthlyTotal,
   getExchangeRates,
   getRateForMonth,
+  createTransaction,
 } from '@/services/financeService'
 import { Category, Transaction, MonthlyTotal, ExchangeRate } from '@/types/finance'
+import { InlineEstimateCell, InlineActualCell } from '@/components/InlineBudgetEditCell'
 import { formatCurrency, formatPercent, formatMonthShort } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
@@ -226,7 +228,7 @@ export default function BudgetVsActualView() {
     setNewEstimate(String(cat.estimated || 0))
   }
 
-  // Save new estimate
+  // Save new estimate (from modal)
   const handleSaveEstimate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingCategory) return
@@ -243,6 +245,53 @@ export default function BudgetVsActualView() {
       toast({ title: 'Erro ao atualizar estimado', variant: 'destructive' })
     } finally {
       setSavingEstimate(false)
+    }
+  }
+
+  // Quick Inline Save for category/subcategory estimate
+  const handleInlineSaveEstimate = async (categoryId: string, newAmountBrl: number) => {
+    try {
+      await updateCategory(categoryId, { estimated: newAmountBrl })
+      toast({
+        title: 'Orçamento atualizado!',
+        description: `Novo teto mensal definido como ${formatCurrency(newAmountBrl, currency)}.`,
+      })
+      loadData()
+    } catch (err) {
+      console.error(err)
+      toast({
+        title: 'Erro ao atualizar orçamento',
+        description: 'Não foi possível salvar a alteração.',
+        variant: 'destructive',
+      })
+      throw err
+    }
+  }
+
+  // Create manual adjustment transaction when user edits Real cell
+  const handleCreateAdjustmentTx = async (data: {
+    date: string
+    description: string
+    amount: number
+    category?: string
+    source: 'manual'
+    month: string
+  }) => {
+    try {
+      await createTransaction(data)
+      toast({
+        title: 'Lançamento de ajuste salvo!',
+        description: `${data.description} (${formatCurrency(data.amount, currency)}) registrado com sucesso.`,
+      })
+      loadData()
+    } catch (err) {
+      console.error(err)
+      toast({
+        title: 'Erro ao registrar ajuste',
+        description: 'Não foi possível salvar o lançamento.',
+        variant: 'destructive',
+      })
+      throw err
     }
   }
 
@@ -410,7 +459,15 @@ export default function BudgetVsActualView() {
                         </td>
 
                         <td className="py-3 px-3 text-right tabular-nums text-slate-500 whitespace-nowrap">
-                          {formatCurrency(row.estimatedMonthly, currency)}
+                          <InlineEstimateCell
+                            value={row.estimatedMonthly}
+                            currency={currency}
+                            rate={getRateForMonth(undefined, exchangeRates)}
+                            categoryId={row.id}
+                            categoryName={row.name}
+                            onSave={(val) => handleInlineSaveEstimate(row.id, val)}
+                            className="font-medium"
+                          />
                         </td>
 
                         {/* Month columns */}
@@ -418,10 +475,6 @@ export default function BudgetVsActualView() {
                           const cell = row.monthly[m]
                           const mRate = getRateForMonth(m, exchangeRates)
                           const act = cell?.actual || 0
-                          // Estimated is stored in EUR (from sheet import) or in BRL?
-                          // When user inputs estimate in EUR or BRL: in the sheet import, estimated was in EUR.
-                          // If currency is BRL, est in BRL is estEur * mRate (or est if stored in BRL).
-                          // To ensure accurate matrix comparison:
                           const est = cell?.estimated || 0
                           const isOver = est > 0 && act > est
                           const pctOver = est > 0 ? (act - est) / est : 0
@@ -437,10 +490,30 @@ export default function BudgetVsActualView() {
                               title={`Mês ${m}: taxa R$ ${mRate.toFixed(2)} / €`}
                             >
                               <div className="font-bold text-xs">
-                                {formatCurrency(act, currency, mRate)}
+                                <InlineActualCell
+                                  value={act}
+                                  currency={currency}
+                                  rate={mRate}
+                                  month={m}
+                                  categoryId={row.id}
+                                  categoryName={row.name}
+                                  isOverBudget={isOver}
+                                  onCreateAdjustmentTx={handleCreateAdjustmentTx}
+                                  onAdjustmentCreated={loadData}
+                                />
                               </div>
                               <div className="text-[10px] text-slate-400">
-                                / {formatCurrency(est, currency, mRate)}
+                                <span className="text-slate-400 mr-0.5">/</span>
+                                <InlineEstimateCell
+                                  value={est}
+                                  currency={currency}
+                                  rate={mRate}
+                                  categoryId={row.id}
+                                  categoryName={row.name}
+                                  monthLabel={formatMonthShort(m)}
+                                  onSave={(val) => handleInlineSaveEstimate(row.id, val)}
+                                  className="text-slate-500 text-[10px]"
+                                />
                               </div>
                               {isOver && (
                                 <span className="inline-block mt-0.5 text-[9px] font-bold text-red-600 bg-red-100 px-1 py-0.2 rounded">
@@ -479,9 +552,17 @@ export default function BudgetVsActualView() {
                             </td>
 
                             <td className="py-2.5 px-3 text-right tabular-nums text-slate-400 text-xs">
-                              {sub.estimatedMonthly > 0
-                                ? formatCurrency(sub.estimatedMonthly, currency)
-                                : '-'}
+                              <InlineEstimateCell
+                                value={sub.estimatedMonthly}
+                                currency={currency}
+                                rate={getRateForMonth(undefined, exchangeRates)}
+                                categoryId={sub.id}
+                                categoryName={row.name}
+                                subCategoryName={sub.name}
+                                onSave={(val) => handleInlineSaveEstimate(sub.id, val)}
+                                emptyLabel="-"
+                                className="text-slate-500"
+                              />
                             </td>
 
                             {activeMonths.map((m) => {
@@ -493,7 +574,18 @@ export default function BudgetVsActualView() {
                                   key={m}
                                   className="py-2.5 px-2 text-center tabular-nums text-xs text-slate-600"
                                 >
-                                  {sAct > 0 ? formatCurrency(sAct, currency, sRate) : '—'}
+                                  <InlineActualCell
+                                    value={sAct}
+                                    currency={currency}
+                                    rate={sRate}
+                                    month={m}
+                                    categoryId={row.id}
+                                    categoryName={row.name}
+                                    subCategoryId={sub.id}
+                                    subCategoryName={sub.name}
+                                    onCreateAdjustmentTx={handleCreateAdjustmentTx}
+                                    onAdjustmentCreated={loadData}
+                                  />
                                 </td>
                               )
                             })}
