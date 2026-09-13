@@ -8,11 +8,13 @@ import {
   createTransactionsBatch,
   updateTransaction,
   deleteTransaction,
+  getExchangeRates,
+  getRateForMonth,
 } from '@/services/financeService'
 import { suggestCategory } from '@/lib/categorizer'
 import { parseCSV, parseAmount, normalizeDate, ParsedRow } from '@/lib/fileParser'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
-import { Transaction, Category } from '@/types/finance'
+import { Transaction, Category, ExchangeRate } from '@/types/finance'
 import { useToast } from '@/hooks/use-toast'
 import {
   UploadCloud,
@@ -68,6 +70,7 @@ export default function TransactionsView() {
   const navigate = useNavigate()
 
   const [categories, setCategories] = useState<Category[]>([])
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalItems, setTotalItems] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
@@ -110,8 +113,9 @@ export default function TransactionsView() {
   // Load Categories
   const loadCategories = async () => {
     try {
-      const cats = await getCategories()
+      const [cats, ratesList] = await Promise.all([getCategories(), getExchangeRates()])
       setCategories(cats)
+      setExchangeRates(ratesList)
     } catch (e) {
       console.error(e)
     }
@@ -630,8 +634,35 @@ export default function TransactionsView() {
                           {tx.source === 'importado' ? 'Importado' : 'Manual'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums">
-                        {formatCurrency(tx.amount, currency)}
+                      <td className="py-3 px-4 text-right tabular-nums">
+                        {(() => {
+                          const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+                          const rateUsed = getRateForMonth(txMonth, exchangeRates)
+                          const isEurView = currency === 'EUR'
+
+                          // If currency is EUR: tx.amount is stored in EUR (from sheet) or in BRL?
+                          // In the sheet import, amount was stored in EUR (val) or in BRL.
+                          // When displaying, formatCurrency uses rateUsed.
+                          // If stored in BRL: formatCurrency(tx.amount, currency, rateUsed)
+                          // If stored in EUR: format in EUR, converted to BRL is tx.amount * rateUsed
+                          // Since transactions are all entries in EUR converted to real:
+                          // Let's display with formatCurrency passing the month rate:
+                          return (
+                            <div className="flex flex-col items-end">
+                              <span className="font-bold text-slate-900">
+                                {formatCurrency(tx.amount, currency, rateUsed)}
+                              </span>
+                              <span
+                                className="text-[10px] text-slate-400 font-normal hover:text-slate-700 cursor-help"
+                                title={`Convertido usando a taxa média de ${txMonth}: € 1 = R$ ${rateUsed.toFixed(2)}`}
+                              >
+                                {isEurView
+                                  ? `câmbio R$ ${rateUsed.toFixed(2)}`
+                                  : `× ${rateUsed.toFixed(2)}`}
+                              </span>
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap space-x-1">
                         <Button

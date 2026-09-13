@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   PlanningParsedData,
   PlanningSection,
@@ -7,6 +7,8 @@ import {
 } from '@/lib/planningParser'
 import { convertSheetToMarkdown, importPlanningData } from '@/services/financeService'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
+import { getExchangeRates, getRateForMonth, convertEurToBrl } from '@/services/financeService'
+import { ExchangeRate } from '@/types/finance'
 import { useToast } from '@/hooks/use-toast'
 import {
   FileSpreadsheet,
@@ -64,6 +66,7 @@ export default function PlanningImporter({
 
   // Success summary modal
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [importSummary, setImportSummary] = useState<{
     mainCategoriesCreated: number
     subCategoriesCreated: number
@@ -72,6 +75,11 @@ export default function PlanningImporter({
     transactionsDeleted: number
     year: number
   } | null>(null)
+
+  // Load exchange rates when mounting
+  useEffect(() => {
+    getExchangeRates().then(setExchangeRates).catch(console.error)
+  }, [])
 
   // Toggle section expansion in preview
   const toggleSection = (secName: string) => {
@@ -157,6 +165,7 @@ export default function PlanningImporter({
         sections: parsedData.sections,
         replaceExisting,
         monthsToImport,
+        rates: exchangeRates,
       })
 
       setImportSummary({
@@ -212,7 +221,7 @@ export default function PlanningImporter({
           estimado e valores mensais realizados de <strong>Janeiro a Agosto</strong>.
         </p>
         <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-          Valores em Euros (€) com conversão automática para BRL
+          Valores em Euros (€) convertidos para R$ pela taxa média de cada mês
           <ArrowRight className="h-3 w-3" />
         </div>
       </div>
@@ -241,6 +250,11 @@ export default function PlanningImporter({
               <li>
                 <strong>Lançamentos Históricos:</strong> gera transações mensais (YYYY-MM-01) para
                 cada valor realizado preenchido entre Jan e Ago.
+              </li>
+              <li>
+                <strong>Câmbio por Mês:</strong> cada mês usa sua taxa de câmbio mensal
+                correspondente (ex: Jan 2026 usa a taxa de Jan/2026, Fev/2026 usa a taxa de
+                Fev/2026).
               </li>
               <li>
                 <strong>Idempotência:</strong> você pode optar por substituir importações anteriores
@@ -447,6 +461,8 @@ export default function PlanningImporter({
                                   </td>
                                   {parsedData.detectedMonths.map((m) => {
                                     const val = item.monthlyValues[String(m.index)]
+                                    const mStr = `${importYear}-${String(m.index).padStart(2, '0')}`
+                                    const mRate = getRateForMonth(mStr, exchangeRates)
                                     return (
                                       <td
                                         key={m.index}
@@ -455,8 +471,25 @@ export default function PlanningImporter({
                                             ? 'font-bold text-slate-900 bg-emerald-50/40'
                                             : 'text-slate-300'
                                         }`}
+                                        title={
+                                          val > 0
+                                            ? `€ ${val} × R$ ${mRate.toFixed(2)} = R$ ${(val * mRate).toFixed(2)}`
+                                            : undefined
+                                        }
                                       >
-                                        {val > 0 ? formatCurrency(val, 'EUR') : '—'}
+                                        {val > 0 ? (
+                                          <div>
+                                            <div>{formatCurrency(val, 'EUR')}</div>
+                                            <div className="text-[9px] text-slate-500 font-normal">
+                                              ≈ R${' '}
+                                              {(val * mRate).toLocaleString('pt-BR', {
+                                                maximumFractionDigits: 0,
+                                              })}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          '—'
+                                        )}
                                       </td>
                                     )
                                   })}

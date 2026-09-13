@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/hooks/use-realtime'
 import {
@@ -12,10 +13,10 @@ import { formatCurrency } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
 import {
-  FolderTree,
   Plus,
-  Trash2,
   Edit2,
+  Trash2,
+  FolderTree,
   ChevronRight,
   ChevronDown,
   FolderPlus,
@@ -34,6 +35,7 @@ import {
   Gift,
   PlusCircle,
   TrendingUp,
+  ArrowLeftRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,6 +61,7 @@ import {
 export default function CategoriesView() {
   const { user, currency } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
@@ -230,6 +233,15 @@ export default function CategoriesView() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate('/cambio')}
+            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+          >
+            <ArrowLeftRight className="mr-2 h-4 w-4 text-blue-600" />
+            Tabela de Câmbio
+          </Button>
+
           <Button
             variant="outline"
             onClick={() => handleOpenAdd('sub')}

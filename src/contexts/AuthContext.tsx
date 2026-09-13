@@ -19,12 +19,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AuthModel | null>(pb.authStore.record)
   const [loading, setLoading] = useState(true)
   const [currency, setCurrencyState] = useState<Currency>(() => {
-    return (localStorage.getItem('app_currency') as Currency) || 'BRL'
+    const saved = localStorage.getItem('app_currency')
+    return saved === 'EUR' || saved === 'BRL' ? (saved as Currency) : 'BRL'
   })
 
   const setCurrency = (c: Currency) => {
-    setCurrencyState(c)
-    localStorage.setItem('app_currency', c)
+    const chosen = c === 'EUR' ? 'EUR' : 'BRL'
+    setCurrencyState(chosen)
+    localStorage.setItem('app_currency', chosen)
   }
 
   useEffect(() => {

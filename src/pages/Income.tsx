@@ -11,8 +11,10 @@ import {
   createRecurringIncome,
   updateRecurringIncome,
   deleteRecurringIncome,
+  getExchangeRates,
+  getRateForMonth,
 } from '@/services/financeService'
-import { Income, RecurringIncome, Transaction } from '@/types/finance'
+import { Income, RecurringIncome, Transaction, ExchangeRate } from '@/types/finance'
 import { formatCurrency, formatPercent, formatMonthLong, formatMonthShort } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
@@ -51,6 +53,7 @@ export default function IncomeView() {
   const [incomes, setIncomes] = useState<Income[]>([])
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [loading, setLoading] = useState(true)
 
   // Add Punctual Income modal state
@@ -83,14 +86,16 @@ export default function IncomeView() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [incList, recList, txList] = await Promise.all([
+      const [incList, recList, txList, rates] = await Promise.all([
         getIncomes(),
         getRecurringIncomes(),
         getAllTransactions(),
+        getExchangeRates(),
       ])
       setIncomes(incList)
       setRecurringIncomes(recList)
       setTransactions(txList)
+      setExchangeRates(rates)
     } catch (err) {
       console.error(err)
     } finally {
@@ -109,10 +114,12 @@ export default function IncomeView() {
   // Metrics calculation considering punctual + recurring
   const metrics = useMemo(() => {
     const activeRecurringList = recurringIncomes.filter((r) => r.active)
-    const activeRecurringMonthlyBrl = activeRecurringList.reduce(
-      (acc, r) => acc + (Number(r.amount_brl) || 0),
-      0,
-    )
+    const currentM = new Date().toISOString().slice(0, 7)
+    const activeRecurringMonthlyBrl = activeRecurringList.reduce((acc, r) => {
+      if (r.amount_brl) return acc + Number(r.amount_brl)
+      const rMonthRate = getRateForMonth(currentM, exchangeRates)
+      return acc + (Number(r.amount_eur) || 0) * rMonthRate
+    }, 0)
     const activeRecurringMonthlyEur = activeRecurringList.reduce(
       (acc, r) => acc + (Number(r.amount_eur) || 0),
       0,
@@ -129,16 +136,37 @@ export default function IncomeView() {
     // If there are no transactions or punctual incomes yet, at least 1 month reference
     const monthsCount = Math.max(uniqueMonths.size, 1)
 
-    // Total punctual income
-    const totalPunctualBrl = incomes.reduce((acc, inc) => acc + (Number(inc.amount_brl) || 0), 0)
+    // Total punctual income in BRL (using month rate)
+    const totalPunctualBrl = incomes.reduce((acc, inc) => {
+      const rMonthRate = getRateForMonth(inc.month, exchangeRates)
+      const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * rMonthRate
+      return acc + valBrl
+    }, 0)
 
-    // Total income = punctual + (active recurring * months analysed)
-    const totalRecurringBrl = activeRecurringMonthlyBrl * monthsCount
+    // For recurring: calculate sum month by month according to each month's rate
+    let totalRecurringBrl = 0
+    if (uniqueMonths.size > 0) {
+      uniqueMonths.forEach((m) => {
+        const mRate = getRateForMonth(m, exchangeRates)
+        activeRecurringList.forEach((r) => {
+          totalRecurringBrl += Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate
+        })
+      })
+    } else {
+      totalRecurringBrl = activeRecurringMonthlyBrl * monthsCount
+    }
+
     const totalIncome = totalPunctualBrl + totalRecurringBrl
 
-    const totalExpenses = transactions.reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0)
+    // Total expenses in BRL (each transaction uses its month's rate)
+    const totalExpenses = transactions.reduce((acc, tx) => {
+      const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      const txRate = getRateForMonth(txMonth, exchangeRates)
+      // tx.amount is converted with txRate if currency format / or stored in BRL
+      return acc + (Number(tx.amount) || 0)
+    }, 0)
 
-    // Average monthly income = (total punctual / months) + recurring monthly
+    // Average monthly income = total / months
     const avgMonthlyIncome = totalIncome / monthsCount
 
     // Savings rate = (income - expenses) / income
@@ -155,12 +183,18 @@ export default function IncomeView() {
 
     const punctualByMonth: Record<string, number> = {}
     incomes.forEach((inc) => {
-      punctualByMonth[inc.month] = (punctualByMonth[inc.month] || 0) + (Number(inc.amount_brl) || 0)
+      const mRate = getRateForMonth(inc.month, exchangeRates)
+      const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * mRate
+      punctualByMonth[inc.month] = (punctualByMonth[inc.month] || 0) + valBrl
     })
 
     const deficitMonths: { month: string; deficit: number; income: number; expense: number }[] = []
     Object.keys(expensesByMonth).forEach((m) => {
-      const inc = (punctualByMonth[m] || 0) + activeRecurringMonthlyBrl
+      const mRate = getRateForMonth(m, exchangeRates)
+      const recurringForMonth = activeRecurringList.reduce((acc, r) => {
+        return acc + (Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate)
+      }, 0)
+      const inc = (punctualByMonth[m] || 0) + recurringForMonth
       const exp = expensesByMonth[m] || 0
       if (exp > inc) {
         deficitMonths.push({
@@ -182,7 +216,7 @@ export default function IncomeView() {
       deficitMonths,
       monthsCount,
     }
-  }, [incomes, recurringIncomes, transactions])
+  }, [incomes, recurringIncomes, transactions, exchangeRates])
 
   // Handle Add Punctual Income
   const handleSaveIncome = async (e: React.FormEvent) => {
@@ -194,8 +228,9 @@ export default function IncomeView() {
 
     try {
       setSaving(true)
+      const monthRate = getRateForMonth(month, exchangeRates)
       const valBrl = parseAmount(amountBrl)
-      const valEur = amountEur ? parseAmount(amountEur) : valBrl / 6.0
+      const valEur = amountEur ? parseAmount(amountEur) : valBrl / monthRate
 
       await createIncome({
         month,
@@ -236,8 +271,9 @@ export default function IncomeView() {
 
     try {
       setSavingEdit(true)
+      const monthRate = getRateForMonth(editMonth, exchangeRates)
       const valBrl = parseAmount(editAmountBrl)
-      const valEur = editAmountEur ? parseAmount(editAmountEur) : valBrl / 6.0
+      const valEur = editAmountEur ? parseAmount(editAmountEur) : valBrl / monthRate
 
       await updateIncome(editingIncome.id, {
         month: editMonth,
@@ -314,8 +350,9 @@ export default function IncomeView() {
 
     try {
       setSavingRecurring(true)
+      const defaultRate = getRateForMonth(new Date().toISOString().slice(0, 7), exchangeRates)
       const eur = parseAmount(recAmountEur)
-      const brl = recAmountBrl ? parseAmount(recAmountBrl) : eur * 6.0
+      const brl = recAmountBrl ? parseAmount(recAmountBrl) : eur * defaultRate
 
       if (editingRecurring) {
         await updateRecurringIncome(editingRecurring.id, {
@@ -376,8 +413,8 @@ export default function IncomeView() {
             </Badge>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Gestão de receitas recorrentes mensais e aportes pontuais em EUR e BRL (câmbio 6.0).
-            Recorrências são contabilizadas automaticamente em todos os meses sem digitação manual.
+            Gestão de receitas recorrentes mensais e aportes pontuais convertidos para Real (R$) com
+            base no câmbio do mês correspondente.
           </p>
         </div>
 
@@ -595,7 +632,11 @@ export default function IncomeView() {
                         </Badge>
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums">
-                        {formatCurrency(Number(rec.amount_eur) * 6.0, 'EUR')}
+                        €{' '}
+                        {Number(rec.amount_eur).toLocaleString('pt-BR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-emerald-700 tabular-nums">
                         {formatCurrency(rec.amount_brl, 'BRL')}
@@ -712,7 +753,26 @@ export default function IncomeView() {
                         {formatCurrency(inc.amount_brl, 'BRL')}
                       </td>
                       <td className="py-3 px-4 text-right text-slate-600 tabular-nums font-medium">
-                        {formatCurrency(inc.amount_brl, 'EUR')}
+                        {(() => {
+                          const rateUsed = getRateForMonth(inc.month, exchangeRates)
+                          const eurVal = inc.amount_eur
+                            ? Number(inc.amount_eur)
+                            : Number(inc.amount_brl) / rateUsed
+                          return (
+                            <div className="flex flex-col items-end">
+                              <span>
+                                €{' '}
+                                {eurVal.toLocaleString('pt-BR', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-normal">
+                                (taxa R$ {rateUsed.toFixed(2)})
+                              </span>
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap space-x-1">
                         <Button
@@ -776,8 +836,12 @@ export default function IncomeView() {
                   onChange={(e) => {
                     setRecAmountEur(e.target.value)
                     const parsed = parseAmount(e.target.value)
+                    const curRate = getRateForMonth(
+                      new Date().toISOString().slice(0, 7),
+                      exchangeRates,
+                    )
                     if (parsed > 0) {
-                      setRecAmountBrl((parsed * 6.0).toFixed(2))
+                      setRecAmountBrl((parsed * curRate).toFixed(2))
                     }
                   }}
                   required
@@ -793,8 +857,12 @@ export default function IncomeView() {
                   onChange={(e) => {
                     setRecAmountBrl(e.target.value)
                     const parsed = parseAmount(e.target.value)
+                    const curRate = getRateForMonth(
+                      new Date().toISOString().slice(0, 7),
+                      exchangeRates,
+                    )
                     if (parsed > 0) {
-                      setRecAmountEur((parsed / 6.0).toFixed(2))
+                      setRecAmountEur((parsed / curRate).toFixed(2))
                     }
                   }}
                   required
@@ -821,8 +889,8 @@ export default function IncomeView() {
             <div className="rounded-lg bg-blue-50 p-2.5 border border-blue-200 text-xs text-blue-900 flex items-start gap-2">
               <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
               <span>
-                Câmbio fixo do sistema: € 1 = R$ 6,00. O valor de € 5.000,00 equivale a R$ 30.000,00
-                mensais.
+                A conversão mensal utilizará a cotação média de cada mês na tabela orçamentária e
+                gráficos.
               </span>
             </div>
 
@@ -889,8 +957,9 @@ export default function IncomeView() {
                   onChange={(e) => {
                     setAmountBrl(e.target.value)
                     const parsed = parseAmount(e.target.value)
+                    const mRate = getRateForMonth(month, exchangeRates)
                     if (parsed > 0) {
-                      setAmountEur((parsed / 6.0).toFixed(2))
+                      setAmountEur((parsed / mRate).toFixed(2))
                     }
                   }}
                   required

@@ -8,6 +8,8 @@ import {
   getIncomes,
   getRecurringIncomes,
   getMonthlyTotals,
+  getExchangeRates,
+  getRateForMonth,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
 import {
@@ -15,8 +17,9 @@ import {
   Category,
   Income,
   RecurringIncome,
-  MonthlyTotal,
   Alert,
+  MonthlyTotal,
+  ExchangeRate,
 } from '@/types/finance'
 import { formatCurrency, formatPercent, formatMonthShort } from '@/lib/formatters'
 import { CountUp } from '@/components/CountUp'
@@ -58,18 +61,20 @@ export default function Index() {
   const [categories, setCategories] = useState<Category[]>([])
   const [incomes, setIncomes] = useState<Income[]>([])
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [monthlyTotals, setMonthlyTotals] = useState<MonthlyTotal[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
 
   // Load initial data
   const loadData = async () => {
     try {
-      const [txs, cats, incs, recIncs, mTotals] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals, ratesList] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
         getRecurringIncomes(),
         getMonthlyTotals(),
+        getExchangeRates(),
       ])
 
       setTransactions(txs)
@@ -77,6 +82,7 @@ export default function Index() {
       setIncomes(incs)
       setRecurringIncomes(recIncs)
       setMonthlyTotals(mTotals)
+      setExchangeRates(ratesList)
 
       // Compute and sync dynamic alerts (considering active recurring incomes)
       const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs)
@@ -178,13 +184,16 @@ export default function Index() {
     const sortedMonths = Object.keys(monthMap).sort()
     return sortedMonths.map((m) => {
       const realAmount = monthMap[m]
+      const mRate = getRateForMonth(m, exchangeRates)
       return {
         month: formatMonthShort(m),
-        real: currency === 'EUR' ? realAmount / 6.0 : realAmount,
-        orcado: currency === 'EUR' ? monthlyBudget / 6.0 : monthlyBudget,
+        monthKey: m,
+        rate: mRate,
+        real: currency === 'EUR' ? realAmount / mRate : realAmount,
+        orcado: currency === 'EUR' ? monthlyBudget / mRate : monthlyBudget,
       }
     })
-  }, [transactions, categories, currency])
+  }, [transactions, categories, currency, exchangeRates])
 
   // Data for Category Donut Chart
   const donutChartData = useMemo(() => {
@@ -230,13 +239,19 @@ export default function Index() {
       }
     })
 
+    // For EUR display: average rate across all recorded transactions
+    const avgYearRate =
+      exchangeRates.length > 0
+        ? exchangeRates.reduce((a, b) => a + Number(b.rate), 0) / exchangeRates.length
+        : 6.0
+
     const result = Array.from(catMap.values())
       .filter((item) => item.total > 0)
       .map((item) => ({
         name: item.name,
         value:
           currency === 'EUR'
-            ? Number((item.total / 6.0).toFixed(2))
+            ? Number((item.total / avgYearRate).toFixed(2))
             : Number(item.total.toFixed(2)),
         rawTotal: item.total,
         percentage: totalAll > 0 ? (item.total / totalAll) * 100 : 0,
@@ -245,7 +260,7 @@ export default function Index() {
       .sort((a, b) => b.value - a.value)
 
     return result
-  }, [transactions, categories, currency])
+  }, [transactions, categories, currency, exchangeRates])
 
   return (
     <div className="space-y-8 animate-fade-in pb-8">
@@ -257,11 +272,14 @@ export default function Index() {
             <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50 text-xs">
               Planejamento 2026
             </Badge>
+            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-medium hidden sm:inline-flex">
+              Moeda Oficial: R$ (BRL)
+            </Badge>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Consolidado analítico a partir de suas faturas de cartão de crédito e extratos
-            bancários.
-          </p>
+            Consolidado analítico com conversão automática de cada lançamento pela taxa média do mês
+            correspondente.
+          </p>{' '}
         </div>
 
         <div className="flex items-center gap-3">
@@ -460,9 +478,16 @@ export default function Index() {
                     />
                     <YAxis tick={{ fill: '#64748B', fontSize: 12 }} stroke="#CBD5E1" />
                     <Tooltip
-                      formatter={(val: any) => [
-                        formatCurrency(Number(val) * (currency === 'EUR' ? 6 : 1), currency),
-                      ]}
+                      formatter={(val: any, _name: any, item: any) => {
+                        const mRate = item?.payload?.rate || 6.0
+                        return [
+                          formatCurrency(
+                            Number(val) * (currency === 'EUR' ? mRate : 1),
+                            currency,
+                            mRate,
+                          ),
+                        ]
+                      }}
                       contentStyle={{
                         backgroundColor: '#FFFFFF',
                         borderRadius: 8,
@@ -531,9 +556,20 @@ export default function Index() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(val: any) => [
-                          formatCurrency(Number(val) * (currency === 'EUR' ? 6 : 1), currency),
-                        ]}
+                        formatter={(val: any) => {
+                          const avgRate =
+                            exchangeRates.length > 0
+                              ? exchangeRates.reduce((a, b) => a + Number(b.rate), 0) /
+                                exchangeRates.length
+                              : 6.0
+                          return [
+                            formatCurrency(
+                              Number(val) * (currency === 'EUR' ? avgRate : 1),
+                              currency,
+                              avgRate,
+                            ),
+                          ]
+                        }}
                       />
                     </PieChart>
                   </ResponsiveContainer>

@@ -6,7 +6,104 @@ import {
   RecurringIncome,
   Alert,
   MonthlyTotal,
+  ExchangeRate,
+  EUR_EXCHANGE_RATE,
 } from '@/types/finance'
+
+// ==================== EXCHANGE RATES ====================
+export async function getExchangeRates(): Promise<ExchangeRate[]> {
+  return await pb.collection('exchange_rates').getFullList<ExchangeRate>({
+    sort: 'month',
+  })
+}
+
+export function getRateForMonth(
+  month: string | undefined | null,
+  rates: ExchangeRate[] | Map<string, number> | Record<string, number>,
+): number {
+  if (!month) return EUR_EXCHANGE_RATE
+  const m = month.slice(0, 7) // Normalize to YYYY-MM
+
+  if (rates instanceof Map) {
+    return rates.get(m) ?? EUR_EXCHANGE_RATE
+  }
+  if (Array.isArray(rates)) {
+    const found = rates.find((r) => r.month === m)
+    return found?.rate && Number(found.rate) > 0 ? Number(found.rate) : EUR_EXCHANGE_RATE
+  }
+  if (typeof rates === 'object' && rates !== null) {
+    const val = (rates as Record<string, number>)[m]
+    return val && Number(val) > 0 ? Number(val) : EUR_EXCHANGE_RATE
+  }
+  return EUR_EXCHANGE_RATE
+}
+
+/**
+ * Converte EUR -> BRL usando a taxa do mês correspondente
+ */
+export function convertEurToBrl(
+  amountEur: number,
+  month: string | undefined | null,
+  rates: ExchangeRate[] | Map<string, number> | Record<string, number>,
+): number {
+  const rate = getRateForMonth(month, rates)
+  return amountEur * rate
+}
+
+/**
+ * Converte BRL -> EUR usando a taxa do mês correspondente
+ */
+export function convertBrlToEur(
+  amountBrl: number,
+  month: string | undefined | null,
+  rates: ExchangeRate[] | Map<string, number> | Record<string, number>,
+): number {
+  const rate = getRateForMonth(month, rates)
+  return rate > 0 ? amountBrl / rate : amountBrl / EUR_EXCHANGE_RATE
+}
+
+export async function upsertExchangeRate(month: string, rate: number): Promise<ExchangeRate> {
+  const userId = pb.authStore.record?.id
+  const m = month.slice(0, 7)
+
+  // Try finding existing record for this month (user-specific or global)
+  try {
+    let filter = `month = '${m}'`
+    if (userId) {
+      filter += ` && (user = '${userId}' || user = null || user = '')`
+    }
+    const existingList = await pb.collection('exchange_rates').getFullList<ExchangeRate>({
+      filter,
+      sort: '-user,-created',
+      limit: 1,
+    })
+
+    if (existingList.length > 0) {
+      const existing = existingList[0]
+      return await pb.collection('exchange_rates').update<ExchangeRate>(existing.id, {
+        rate,
+        user: userId || undefined,
+      })
+    }
+  } catch {
+    /* intentionally ignored */
+  }
+
+  // Create new
+  return await pb.collection('exchange_rates').create<ExchangeRate>({
+    month: m,
+    rate,
+    user: userId || undefined,
+  })
+}
+
+export async function bulkUpsertExchangeRates(
+  rates: Array<{ month: string; rate: number }>,
+): Promise<void> {
+  for (const item of rates) {
+    await upsertExchangeRate(item.month, item.rate)
+  }
+}
 
 // ==================== CATEGORIES ====================
 export async function getCategories(): Promise<Category[]> {
@@ -212,24 +309,35 @@ export function calculateMonthIncome(
   month: string,
   incomes: Income[],
   recurringIncomes: RecurringIncome[],
-): { brl: number; eur: number } {
+  rates?: ExchangeRate[] | Map<string, number> | Record<string, number>,
+): { brl: number; eur: number; rateUsed: number } {
+  const rate = rates ? getRateForMonth(month, rates) : EUR_EXCHANGE_RATE
+
   const activeRecurring = recurringIncomes.filter((r) => r.active)
-  const recurringBrl = activeRecurring.reduce((sum, r) => sum + (Number(r.amount_brl) || 0), 0)
+  // For recurring: if amount_brl is present, use it; otherwise convert from EUR using month rate
+  const recurringBrl = activeRecurring.reduce(
+    (sum, r) => sum + (Number(r.amount_brl) || (Number(r.amount_eur) || 0) * rate),
+    0,
+  )
   const recurringEur = activeRecurring.reduce(
-    (sum, r) => sum + (Number(r.amount_eur) || (Number(r.amount_brl) || 0) / 6.0),
+    (sum, r) => sum + (Number(r.amount_eur) || (Number(r.amount_brl) || 0) / rate),
     0,
   )
 
   const monthIncomes = incomes.filter((i) => i.month === month)
-  const punctualBrl = monthIncomes.reduce((sum, i) => sum + (Number(i.amount_brl) || 0), 0)
+  const punctualBrl = monthIncomes.reduce(
+    (sum, i) => sum + (Number(i.amount_brl) || (Number(i.amount_eur) || 0) * rate),
+    0,
+  )
   const punctualEur = monthIncomes.reduce(
-    (sum, i) => sum + (Number(i.amount_eur) || (Number(i.amount_brl) || 0) / 6.0),
+    (sum, i) => sum + (Number(i.amount_eur) || (Number(i.amount_brl) || 0) / rate),
     0,
   )
 
   return {
     brl: punctualBrl + recurringBrl,
     eur: punctualEur + recurringEur,
+    rateUsed: rate,
   }
 }
 
@@ -315,6 +423,7 @@ export async function importPlanningData(params: {
   }>
   replaceExisting: boolean
   monthsToImport: number[] // e.g. [1, 2, 3, 4, 5, 6, 7, 8]
+  rates?: ExchangeRate[] | Map<string, number> | Record<string, number>
 }): Promise<{
   mainCategoriesCreated: number
   subCategoriesCreated: number

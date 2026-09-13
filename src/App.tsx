@@ -11,6 +11,7 @@ import IncomeView from '@/pages/Income'
 import BudgetVsActualView from '@/pages/BudgetVsActual'
 import CategoriesView from '@/pages/Categories'
 import AlertsView from '@/pages/Alerts'
+import ExchangeRatesView from '@/pages/ExchangeRates'
 import NotFound from '@/pages/NotFound'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
@@ -40,6 +41,7 @@ const App = () => (
             <Route path="/receitas" element={<IncomeView />} />
             <Route path="/orcado-vs-realizado" element={<BudgetVsActualView />} />
             <Route path="/categorias" element={<CategoriesView />} />
+            <Route path="/cambio" element={<ExchangeRatesView />} />
             <Route path="/alertas" element={<AlertsView />} />
           </Route>
 

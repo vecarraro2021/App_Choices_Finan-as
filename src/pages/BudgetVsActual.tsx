@@ -7,8 +7,10 @@ import {
   getMonthlyTotals,
   updateCategory,
   upsertMonthlyTotal,
+  getExchangeRates,
+  getRateForMonth,
 } from '@/services/financeService'
-import { Category, Transaction, MonthlyTotal } from '@/types/finance'
+import { Category, Transaction, MonthlyTotal, ExchangeRate } from '@/types/finance'
 import { formatCurrency, formatPercent, formatMonthShort } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
@@ -43,6 +45,7 @@ export default function BudgetVsActualView() {
   const [categories, setCategories] = useState<Category[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [monthlyTotals, setMonthlyTotals] = useState<MonthlyTotal[]>([])
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
 
@@ -60,14 +63,16 @@ export default function BudgetVsActualView() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [cats, txs, mTotals] = await Promise.all([
+      const [cats, txs, mTotals, rates] = await Promise.all([
         getCategories(),
         getAllTransactions(),
         getMonthlyTotals(),
+        getExchangeRates(),
       ])
       setCategories(cats)
       setTransactions(txs)
       setMonthlyTotals(mTotals)
+      setExchangeRates(rates)
     } catch (e) {
       console.error(e)
     } finally {
@@ -350,11 +355,17 @@ export default function BudgetVsActualView() {
                     Categoria
                   </th>
                   <th className="py-3 px-3 text-right">Meta/Mês</th>
-                  {activeMonths.map((m) => (
-                    <th key={m} className="py-3 px-3 text-center whitespace-nowrap min-w-[130px]">
-                      {formatMonthShort(m)}
-                    </th>
-                  ))}
+                  {activeMonths.map((m) => {
+                    const r = getRateForMonth(m, exchangeRates)
+                    return (
+                      <th key={m} className="py-3 px-3 text-center whitespace-nowrap min-w-[130px]">
+                        <div>{formatMonthShort(m)}</div>
+                        <div className="text-[9px] font-normal text-slate-400 capitalize">
+                          € 1 = R$ {r.toFixed(2)}
+                        </div>
+                      </th>
+                    )
+                  })}
                   <th className="py-3 px-4 text-right">Total Período</th>
                 </tr>
               </thead>
@@ -405,7 +416,12 @@ export default function BudgetVsActualView() {
                         {/* Month columns */}
                         {activeMonths.map((m) => {
                           const cell = row.monthly[m]
+                          const mRate = getRateForMonth(m, exchangeRates)
                           const act = cell?.actual || 0
+                          // Estimated is stored in EUR (from sheet import) or in BRL?
+                          // When user inputs estimate in EUR or BRL: in the sheet import, estimated was in EUR.
+                          // If currency is BRL, est in BRL is estEur * mRate (or est if stored in BRL).
+                          // To ensure accurate matrix comparison:
                           const est = cell?.estimated || 0
                           const isOver = est > 0 && act > est
                           const pctOver = est > 0 ? (act - est) / est : 0
@@ -418,12 +434,13 @@ export default function BudgetVsActualView() {
                                   ? 'bg-red-50/60 text-red-900 border-l border-r border-red-100'
                                   : 'text-slate-800'
                               }`}
+                              title={`Mês ${m}: taxa R$ ${mRate.toFixed(2)} / €`}
                             >
                               <div className="font-bold text-xs">
-                                {formatCurrency(act, currency)}
+                                {formatCurrency(act, currency, mRate)}
                               </div>
                               <div className="text-[10px] text-slate-400">
-                                / {formatCurrency(est, currency)}
+                                / {formatCurrency(est, currency, mRate)}
                               </div>
                               {isOver && (
                                 <span className="inline-block mt-0.5 text-[9px] font-bold text-red-600 bg-red-100 px-1 py-0.2 rounded">
@@ -470,12 +487,13 @@ export default function BudgetVsActualView() {
                             {activeMonths.map((m) => {
                               const sCell = sub.monthly[m]
                               const sAct = sCell?.actual || 0
+                              const sRate = getRateForMonth(m, exchangeRates)
                               return (
                                 <td
                                   key={m}
                                   className="py-2.5 px-2 text-center tabular-nums text-xs text-slate-600"
                                 >
-                                  {sAct > 0 ? formatCurrency(sAct, currency) : '—'}
+                                  {sAct > 0 ? formatCurrency(sAct, currency, sRate) : '—'}
                                 </td>
                               )
                             })}
@@ -499,6 +517,7 @@ export default function BudgetVsActualView() {
                   </td>
                   {activeMonths.map((m) => {
                     const mTot = matrixData.totalsPerMonth[m]
+                    const mRate = getRateForMonth(m, exchangeRates)
                     const act = mTot?.actual || 0
                     const est = mTot?.estimated || 0
                     const isOver = est > 0 && act > est
@@ -509,10 +528,11 @@ export default function BudgetVsActualView() {
                         className={`py-3.5 px-2 text-center tabular-nums text-xs ${
                           isOver ? 'text-red-700' : 'text-slate-900'
                         }`}
+                        title={`Mês ${m}: taxa R$ ${mRate.toFixed(2)}`}
                       >
-                        <div>{formatCurrency(act, currency)}</div>
+                        <div>{formatCurrency(act, currency, mRate)}</div>
                         <div className="text-[10px] text-slate-500 font-normal">
-                          / {formatCurrency(est, currency)}
+                          / {formatCurrency(est, currency, mRate)}
                         </div>
                       </td>
                     )

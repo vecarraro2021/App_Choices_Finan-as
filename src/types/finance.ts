@@ -2,6 +2,15 @@ export type Currency = 'BRL' | 'EUR'
 
 export const EUR_EXCHANGE_RATE = 6.0
 
+export interface ExchangeRate {
+  id: string
+  user?: string
+  month: string // 'YYYY-MM'
+  rate: number
+  created?: string
+  updated?: string
+}
+
 export interface Category {
   id: string
   name: string

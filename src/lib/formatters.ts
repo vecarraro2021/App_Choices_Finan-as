@@ -7,12 +7,14 @@ import { Currency, EUR_EXCHANGE_RATE } from '@/types/finance'
 export function formatCurrency(
   valueInBRL: number | undefined | null,
   currency: Currency = 'BRL',
+  rate: number = EUR_EXCHANGE_RATE,
 ): string {
   if (valueInBRL === undefined || valueInBRL === null || isNaN(valueInBRL)) {
     return currency === 'BRL' ? 'R$ 0,00' : '€ 0,00'
   }
 
-  const finalValue = currency === 'EUR' ? valueInBRL / EUR_EXCHANGE_RATE : valueInBRL
+  const effectiveRate = rate > 0 ? rate : EUR_EXCHANGE_RATE
+  const finalValue = currency === 'EUR' ? valueInBRL / effectiveRate : valueInBRL
 
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
