@@ -57,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { CategorySelectCombobox } from '@/components/CategorySelectCombobox'
 
 export default function CategoriesView() {
   const { user, currency } = useAuth()
@@ -192,9 +193,9 @@ export default function CategoriesView() {
   // Open Delete dialog
   const handleOpenDelete = (cat: Category) => {
     setDeletingCat(cat)
-    // Find "Não Categorizado" or first other category
+    // Find "Não Categorizado" or fallback to 'none'
     const uncategorized = categories.find(
-      (c) => c.name.toLowerCase() === 'não categorizado' && c.id !== cat.id,
+      (c) => c.name.toLowerCase().includes('não categorizado') && c.id !== cat.id,
     )
     setReassignTo(uncategorized ? uncategorized.id : 'none')
   }
@@ -597,21 +598,23 @@ export default function CategoriesView() {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Reatribuir lançamentos para:</Label>
-              <Select value={reassignTo} onValueChange={setReassignTo}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione categoria de destino" />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  <SelectItem value="none">Deixar sem categoria</SelectItem>
-                  {categories
-                    .filter((c) => c.id !== deletingCat?.id)
-                    .map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.type === 'sub' ? `↳ ${c.name}` : c.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <CategorySelectCombobox
+                categories={categories}
+                value={reassignTo}
+                onChange={setReassignTo}
+                excludeCategoryId={deletingCat?.id}
+                placeholder="Selecione categoria de destino"
+                searchPlaceholder="Buscar categoria..."
+                emptyText="Nenhuma categoria encontrada."
+                specialOption={
+                  categories.some(
+                    (c) =>
+                      c.name.toLowerCase().includes('não categorizado') && c.id !== deletingCat?.id,
+                  )
+                    ? undefined
+                    : { id: 'none', label: '↳ Não Categorizado' }
+                }
+              />
             </div>
           </div>
 

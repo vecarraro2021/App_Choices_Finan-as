@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { CategorySelectCombobox } from '@/components/CategorySelectCombobox'
 import {
   Dialog,
   DialogContent,
@@ -710,25 +711,19 @@ export default function TransactionsView() {
 
             {/* Category Filter */}
             <div className="w-full sm:w-56">
-              <Select
+              <CategorySelectCombobox
+                categories={categories}
                 value={filterCategory}
-                onValueChange={(val) => {
+                onChange={(val) => {
                   setFilterCategory(val)
                   setPage(1)
                 }}
-              >
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder="Todas as Categorias" />
-                </SelectTrigger>
-                <SelectContent className="max-h-64">
-                  <SelectItem value="all">Todas as Categorias</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.type === 'sub' ? `↳ ${c.name}` : c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                triggerClassName="text-xs h-9"
+                placeholder="Todas as Categorias"
+                searchPlaceholder="Buscar categoria..."
+                emptyText="Nenhuma categoria encontrada."
+                specialOption={{ id: 'all', label: 'Todas as Categorias' }}
+              />
             </div>
           </div>
         </CardContent>
@@ -1205,18 +1200,14 @@ export default function TransactionsView() {
 
             <div className="space-y-1.5">
               <Label htmlFor="m-cat">Categoria</Label>
-              <Select value={manualCategory} onValueChange={setManualCategory}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione uma categoria" />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.type === 'sub' ? `↳ ${c.name}` : c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CategorySelectCombobox
+                categories={categories}
+                value={manualCategory}
+                onChange={setManualCategory}
+                placeholder="Selecione uma categoria"
+                searchPlaceholder="Buscar categoria..."
+                emptyText="Nenhuma categoria encontrada."
+              />
             </div>
 
             <DialogFooter className="pt-2">
@@ -1280,18 +1271,14 @@ export default function TransactionsView() {
 
             <div className="space-y-1.5">
               <Label htmlFor="e-cat">Categoria</Label>
-              <Select value={editCategory} onValueChange={setEditCategory}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione uma categoria" />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.type === 'sub' ? `↳ ${c.name}` : c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CategorySelectCombobox
+                categories={categories}
+                value={editCategory}
+                onChange={setEditCategory}
+                placeholder="Selecione uma categoria"
+                searchPlaceholder="Buscar categoria..."
+                emptyText="Nenhuma categoria encontrada."
+              />
             </div>
 
             <DialogFooter className="pt-2">
