@@ -29,6 +29,7 @@ import {
   GripVertical,
   MoveRight,
   CornerDownRight,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -479,6 +480,158 @@ export default function BudgetVsActualView() {
     return monthlyTotals.filter((mt) => mt.divergence && Math.abs(mt.divergence) > 1)
   }, [monthlyTotals])
 
+  // Helper to format numeric values for pt-BR CSV (decimal comma, no thousands separator for clean Excel data)
+  const formatCsvNumber = (valInBrl: number, monthRate?: number): string => {
+    if (valInBrl === undefined || valInBrl === null || isNaN(valInBrl)) {
+      return '0,00'
+    }
+    const effRate =
+      monthRate && monthRate > 0 ? monthRate : getRateForMonth(undefined, exchangeRates)
+    const converted = currency === 'EUR' ? valInBrl / effRate : valInBrl
+    return converted.toFixed(2).replace('.', ',')
+  }
+
+  const escapeCsvCell = (cell: string): string => {
+    if (cell.includes(';') || cell.includes('"') || cell.includes('\n') || cell.includes('\r')) {
+      return `"${cell.replace(/"/g, '""')}"`
+    }
+    return cell
+  }
+
+  // Export CSV Handler
+  const handleExportCSV = () => {
+    try {
+      const currencySuffix = currency === 'EUR' ? ' (EUR)' : ' (BRL)'
+      const sep = ';'
+
+      // 1. Header row
+      const headers = [
+        'Categoria',
+        'Subcategoria',
+        `Meta/Mês${currencySuffix}`,
+        ...activeMonths.map((m) => `${formatMonthShort(m)}${currencySuffix}`),
+        `Total Período${currencySuffix}`,
+      ]
+
+      const csvRows: string[][] = []
+      csvRows.push(headers)
+
+      // 2. Exchange rate info row
+      const exchangeRateRow = [
+        'Câmbio (€1 = R$)',
+        currency === 'EUR' ? 'Conversão ativa em EUR' : 'Referência de câmbio',
+        `€1 = R$ ${getRateForMonth(undefined, exchangeRates).toFixed(2).replace('.', ',')}`,
+        ...activeMonths.map((m) => {
+          const r = getRateForMonth(m, exchangeRates)
+          return `€1 = R$ ${r.toFixed(2).replace('.', ',')}`
+        }),
+        '-',
+      ]
+      csvRows.push(exchangeRateRow)
+
+      // 3. Data rows by category and subcategory
+      matrixData.rows.forEach((row) => {
+        const defaultRate = getRateForMonth(undefined, exchangeRates)
+
+        // Subcategories first if any
+        if (row.subcategories.length > 0) {
+          row.subcategories.forEach((sub) => {
+            const subCols = [
+              row.name,
+              sub.name,
+              formatCsvNumber(sub.estimatedMonthly, defaultRate),
+              ...activeMonths.map((m) => {
+                const sCell = sub.monthly[m]
+                const mRate = getRateForMonth(m, exchangeRates)
+                return formatCsvNumber(sCell?.actual || 0, mRate)
+              }),
+              formatCsvNumber(sub.totalActual, defaultRate),
+            ]
+            csvRows.push(subCols)
+          })
+
+          // Total row for category
+          const catTotalCols = [
+            row.name,
+            '— Total —',
+            formatCsvNumber(row.estimatedMonthly, defaultRate),
+            ...activeMonths.map((m) => {
+              const mCell = row.monthly[m]
+              const mRate = getRateForMonth(m, exchangeRates)
+              return formatCsvNumber(mCell?.actual || 0, mRate)
+            }),
+            formatCsvNumber(row.totalActual, defaultRate),
+          ]
+          csvRows.push(catTotalCols)
+        } else {
+          // Category has no subcategories: export single row
+          const catCols = [
+            row.name,
+            '-',
+            formatCsvNumber(row.estimatedMonthly, defaultRate),
+            ...activeMonths.map((m) => {
+              const mCell = row.monthly[m]
+              const mRate = getRateForMonth(m, exchangeRates)
+              return formatCsvNumber(mCell?.actual || 0, mRate)
+            }),
+            formatCsvNumber(row.totalActual, defaultRate),
+          ]
+          csvRows.push(catCols)
+        }
+      })
+
+      // 4. Grand Total Row
+      const grandEstimatedMonthly =
+        activeMonths.length > 0 ? matrixData.grandTotalEstimated / activeMonths.length : 0
+      const defaultRate = getRateForMonth(undefined, exchangeRates)
+
+      const grandTotalCols = [
+        'TOTAL GERAL',
+        '— Soma das Categorias —',
+        formatCsvNumber(grandEstimatedMonthly, defaultRate),
+        ...activeMonths.map((m) => {
+          const mTot = matrixData.totalsPerMonth[m]
+          const mRate = getRateForMonth(m, exchangeRates)
+          return formatCsvNumber(mTot?.actual || 0, mRate)
+        }),
+        formatCsvNumber(matrixData.grandTotalActual, defaultRate),
+      ]
+      csvRows.push(grandTotalCols)
+
+      // Build CSV String with UTF-8 BOM
+      const csvContent =
+        '\uFEFF' + csvRows.map((cols) => cols.map(escapeCsvCell).join(sep)).join('\r\n')
+
+      // Determine export year or period label
+      const years = Array.from(new Set(activeMonths.map((m) => m.slice(0, 4)).filter(Boolean)))
+      const periodLabel = years.length > 0 ? years.join('-') : '2026'
+      const fileName = `orcado-vs-realizado-${periodLabel}.csv`
+
+      // Trigger download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.setAttribute('href', url)
+      link.setAttribute('download', fileName)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      toast({
+        title: 'CSV exportado com sucesso!',
+        description: `Arquivo ${fileName} baixado na moeda ${currency}.`,
+      })
+    } catch (err) {
+      console.error('Erro ao exportar CSV:', err)
+      toast({
+        title: 'Erro ao exportar CSV',
+        description: 'Não foi possível gerar a planilha CSV.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Header */}
@@ -491,6 +644,15 @@ export default function BudgetVsActualView() {
         </div>
 
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            className="border-slate-300 hover:bg-slate-100 text-slate-700"
+            title="Exportar matriz analítica em planilha CSV (Excel)"
+          >
+            <Download className="mr-2 h-4 w-4 text-emerald-600" />
+            Exportar CSV
+          </Button>
           <Button
             variant="outline"
             onClick={() => setShowOfficialModal(true)}
