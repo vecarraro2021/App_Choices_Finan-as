@@ -661,19 +661,6 @@ export default function BudgetVsActualView() {
                                   onAdjustmentCreated={loadData}
                                 />
                               </div>
-                              <div className="text-[10px] text-slate-400">
-                                <span className="text-slate-400 mr-0.5">/</span>
-                                <InlineEstimateCell
-                                  value={est}
-                                  currency={currency}
-                                  rate={mRate}
-                                  categoryId={row.id}
-                                  categoryName={row.name}
-                                  monthLabel={formatMonthShort(m)}
-                                  onSave={(val) => handleInlineSaveEstimate(row.id, val)}
-                                  className="text-slate-500 text-[10px]"
-                                />
-                              </div>
                               {isOver && (
                                 <span className="inline-block mt-0.5 text-[9px] font-bold text-red-600 bg-red-100 px-1 py-0.2 rounded">
                                   +{formatPercent(pctOver)}
