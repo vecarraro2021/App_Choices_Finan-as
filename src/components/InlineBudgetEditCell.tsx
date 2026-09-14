@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Check, X, ArrowRight, ExternalLink, PlusCircle, AlertCircle, Edit3 } from 'lucide-react'
+import {
+  Check,
+  X,
+  ArrowRight,
+  ExternalLink,
+  PlusCircle,
+  AlertCircle,
+  Edit3,
+  Loader2,
+} from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +27,7 @@ import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { Currency } from '@/types/finance'
 import { useNavigate } from 'react-router-dom'
+import { useToast } from '@/hooks/use-toast'
 
 // ========================================================
 // 1. INLINE EDIT CELL FOR ESTIMATE / BUDGET (Orçado / Meta)
@@ -225,7 +235,7 @@ export function InlineEstimateCell({
 }
 
 // ========================================================
-// 2. INLINE ACTUAL CELL WITH POP-OPTIONS (Real Clicável)
+// 2. INLINE ACTUAL CELL (Edição direta na célula sem modal)
 // ========================================================
 interface InlineActualCellProps {
   value: number // in BRL
@@ -238,8 +248,10 @@ interface InlineActualCellProps {
   subCategoryName?: string
   isOverBudget?: boolean
   className?: string
+  editable?: boolean // Se a célula permite edição inline (ex.: subcategorias ou linhas permitidas)
+  onSaveTotal?: (newTotalBrl: number) => Promise<void>
   onAdjustmentCreated?: () => void
-  onCreateAdjustmentTx: (data: {
+  onCreateAdjustmentTx?: (data: {
     date: string
     description: string
     amount: number // in BRL
@@ -260,94 +272,125 @@ export function InlineActualCell({
   subCategoryName,
   isOverBudget = false,
   className = '',
+  editable = true,
+  onSaveTotal,
   onAdjustmentCreated,
   onCreateAdjustmentTx,
 }: InlineActualCellProps) {
-  const navigate = useNavigate()
-  const [popoverOpen, setPopoverOpen] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
-
-  // Quick Adjustment Modal State
-  const [adjType, setAdjType] = useState<'increase' | 'decrease' | 'target'>('target')
-  const [targetAmountInput, setTargetAmountInput] = useState('')
-  const [deltaAmountInput, setDeltaAmountInput] = useState('')
-  const [adjDescription, setAdjDescription] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { toast } = useToast()
+  const [isEditing, setIsEditing] = useState(false)
+  const [inputValue, setInputValue] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const isCommittingRef = useRef(false)
+  const isCancelledRef = useRef(false)
 
   const monthShort = formatMonthShort(month)
-  const effectiveCatId = subCategoryId || categoryId
   const effectiveName = subCategoryName ? `${categoryName} › ${subCategoryName}` : categoryName
 
+  // Valor atual na moeda ativa
   const currentDisplayAmount = currency === 'EUR' && rate > 0 ? value / rate : value
 
-  // When opening the adjustment dialog
-  const handleOpenAdjustmentModal = (type: 'target' | 'increase' | 'decrease') => {
-    setAdjType(type)
-    setPopoverOpen(false)
-    setAdjDescription(`Ajuste contábil em ${effectiveName} (${monthShort})`)
-    if (type === 'target') {
-      setTargetAmountInput(
+  // Inicia edição ao clicar
+  const startEditing = () => {
+    if (!editable || isSaving) return
+    isCancelledRef.current = false
+    isCommittingRef.current = false
+
+    if (Math.abs(currentDisplayAmount) > 0.001) {
+      setInputValue(
         currentDisplayAmount.toLocaleString('pt-BR', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         }),
       )
     } else {
-      setDeltaAmountInput('')
+      setInputValue('')
     }
-    setDialogOpen(true)
+    setIsEditing(true)
   }
 
-  // Handle navigate to transactions page filtered
-  const handleGoToTransactions = () => {
-    setPopoverOpen(false)
-    const targetCat = subCategoryId || categoryId
-    navigate(`/transacoes?month=${month}&category=${targetCat}`)
-  }
+  // Auto-foco e seleção ao entrar no modo de edição
+  useEffect(() => {
+    if (isEditing) {
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+          inputRef.current.select()
+        }
+      }, 30)
+    }
+  }, [isEditing])
 
-  // Submit manual adjustment
-  const handleSaveAdjustment = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+  // Salvar alteração (Enter ou blur)
+  const commitChange = async () => {
+    if (isCancelledRef.current || isCommittingRef.current || !isEditing) return
+    isCommittingRef.current = true
+
+    const parsed = parseAmount(inputValue)
+    // Se o usuário limpou o campo ou digitou 0, valor total = 0
+    const targetDisplayVal = isNaN(parsed) ? 0 : Math.max(0, parsed)
+
+    // Converter para BRL se estiver em EUR
+    const targetBrl = currency === 'EUR' && rate > 0 ? targetDisplayVal * rate : targetDisplayVal
+
+    // Se o valor não mudou, simplesmente fecha sem disparar request
+    if (Math.abs(targetBrl - value) < 0.01) {
+      setIsEditing(false)
+      isCommittingRef.current = false
+      return
+    }
 
     try {
-      let adjustmentDeltaInDisplay = 0
-      if (adjType === 'target') {
-        const targetVal = parseAmount(targetAmountInput)
-        adjustmentDeltaInDisplay = targetVal - currentDisplayAmount
-      } else if (adjType === 'increase') {
-        adjustmentDeltaInDisplay = Math.abs(parseAmount(deltaAmountInput))
-      } else if (adjType === 'decrease') {
-        adjustmentDeltaInDisplay = -Math.abs(parseAmount(deltaAmountInput))
+      setIsSaving(true)
+
+      if (onSaveTotal) {
+        await onSaveTotal(targetBrl)
+      } else if (onCreateAdjustmentTx) {
+        // Fallback usando onCreateAdjustmentTx se onSaveTotal não for fornecido
+        const deltaBrl = targetBrl - value
+        const effectiveCatId = subCategoryId || categoryId
+        await onCreateAdjustmentTx({
+          date: `${month}-01`,
+          month,
+          category: effectiveCatId,
+          amount: deltaBrl,
+          source: 'manual',
+          description: `Ajuste contábil em ${effectiveName} (${monthShort})`,
+        })
+        onAdjustmentCreated?.()
       }
 
-      if (Math.abs(adjustmentDeltaInDisplay) < 0.01) {
-        setDialogOpen(false)
-        return
-      }
-
-      // Convert delta to BRL
-      const deltaBrl =
-        currency === 'EUR' && rate > 0 ? adjustmentDeltaInDisplay * rate : adjustmentDeltaInDisplay
-
-      const signText = deltaBrl > 0 ? '+' : ''
-      const defaultDesc = `Ajuste manual (${signText}${formatCurrency(deltaBrl, currency, rate)}) - ${monthShort}`
-
-      await onCreateAdjustmentTx({
-        date: `${month}-01`,
-        month: month,
-        category: effectiveCatId,
-        amount: deltaBrl,
-        source: 'manual',
-        description: adjDescription.trim() || defaultDesc,
-      })
-
-      setDialogOpen(false)
-      onAdjustmentCreated?.()
+      setIsEditing(false)
     } catch (err) {
-      console.error('Falha ao criar transação de ajuste:', err)
+      console.error('Erro ao salvar valor Real inline:', err)
+      toast({
+        title: 'Erro ao salvar valor Real',
+        description: 'Não foi possível salvar o ajuste. O valor foi restaurado.',
+        variant: 'destructive',
+      })
+      // Reverter o estado
+      setIsEditing(false)
     } finally {
-      setIsSubmitting(false)
+      setIsSaving(false)
+      isCommittingRef.current = false
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitChange()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      isCancelledRef.current = true
+      setIsEditing(false)
+    }
+  }
+
+  const handleBlur = () => {
+    if (!isCancelledRef.current) {
+      commitChange()
     }
   }
 
@@ -356,280 +399,76 @@ export function InlineActualCell({
       ? formatCurrency(value, currency, rate)
       : value < 0
         ? formatCurrency(value, currency, rate)
-        : 'R$ 0,00'
+        : currency === 'BRL'
+          ? 'R$ 0,00'
+          : '€ 0,00'
 
+  // Se estiver salvando
+  if (isSaving) {
+    return (
+      <div className="inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs font-semibold select-none">
+        <Loader2 className="h-3 w-3 animate-spin text-blue-600 shrink-0" />
+        <span className="tabular-nums opacity-75">Salvando...</span>
+      </div>
+    )
+  }
+
+  // Se estiver no modo de edição inline
+  if (isEditing) {
+    const symbol = currency === 'BRL' ? 'R$' : '€'
+    return (
+      <div className="relative inline-flex items-center min-w-[110px] max-w-[140px] mx-auto animate-in fade-in duration-150">
+        <span className="absolute left-2 text-[11px] text-slate-400 font-semibold select-none pointer-events-none">
+          {symbol}
+        </span>
+        <Input
+          ref={inputRef}
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder="0,00"
+          disabled={isSaving}
+          className="h-7 pl-7 pr-2 py-0 text-xs font-bold tabular-nums text-center bg-white border-blue-500 ring-2 ring-blue-400/40 shadow-xs focus-visible:ring-blue-500 rounded"
+          aria-label={`Editar valor real de ${effectiveName} em ${monthShort}`}
+        />
+      </div>
+    )
+  }
+
+  // Se não for editável (ex.: apenas display de resumo)
+  if (!editable) {
+    return <span className={`tabular-nums font-inherit ${className}`}>{displayText}</span>
+  }
+
+  // Exibição normal com trigger de clique inline
   return (
-    <>
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={`group inline-flex items-center gap-1 cursor-pointer select-none rounded px-1 -mx-1 transition-all hover:bg-blue-50/90 hover:text-blue-900 border-b border-transparent hover:border-dashed hover:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-400 ${className}`}
-                  aria-label={`Ver ou ajustar valor real de ${effectiveName} em ${monthShort}`}
-                >
-                  <span className="tabular-nums font-inherit">{displayText}</span>
-                  <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-70 text-blue-600 transition-opacity ml-0.5 shrink-0" />
-                </button>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent
-              side="top"
-              className="text-xs bg-slate-900 text-slate-50 py-1 px-2.5 shadow-md"
-            >
-              <span>Clique para editar/ajustar o Real ({currency})</span>
-              {currency === 'EUR' && (
-                <span className="block text-[10px] text-slate-300">
-                  Câmbio: € 1 = R$ {rate.toFixed(2)}
-                </span>
-              )}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
-        <PopoverContent
-          align="center"
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={startEditing}
+            className={`group inline-flex items-center justify-center gap-1 cursor-pointer select-none rounded px-1.5 py-0.5 -mx-1 transition-all hover:bg-blue-50 hover:text-blue-900 border-b border-transparent hover:border-dashed hover:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-400 ${className}`}
+            aria-label={`Clique para editar o valor real de ${effectiveName} em ${monthShort}`}
+          >
+            <span className="tabular-nums font-inherit">{displayText}</span>
+            <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-70 text-blue-600 transition-opacity ml-0.5 shrink-0" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
           side="top"
-          className="w-80 p-3.5 text-xs shadow-xl border-slate-200"
-          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="text-xs bg-slate-900 text-slate-50 py-1 px-2.5 shadow-md"
         >
-          <div className="space-y-3">
-            <div className="flex items-start justify-between pb-1.5 border-b border-slate-100">
-              <div>
-                <span className="text-[10px] font-bold tracking-wider uppercase text-blue-600">
-                  Valor Real • {monthShort}
-                </span>
-                <h4 className="font-bold text-slate-900 leading-tight text-xs truncate max-w-[210px]">
-                  {effectiveName}
-                </h4>
-              </div>
-              <Badge
-                variant={isOverBudget ? 'destructive' : 'secondary'}
-                className="text-[10px] tabular-nums"
-              >
-                {formatCurrency(value, currency, rate)}
-              </Badge>
-            </div>
-
-            <p className="text-[11px] text-slate-600 leading-relaxed">
-              O valor Real é a soma de lançamentos registrados no mês. Como prefere editar este
-              total?
-            </p>
-
-            <div className="space-y-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenAdjustmentModal('target')}
-                className="w-full justify-between h-8 text-xs font-semibold hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300"
-              >
-                <span className="flex items-center gap-1.5">
-                  <PlusCircle className="h-3.5 w-3.5 text-blue-600" />
-                  Definir novo valor total (Ajuste)
-                </span>
-                <span className="text-[10px] text-slate-400">Recomendado</span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleGoToTransactions}
-                className="w-full justify-between h-8 text-xs font-semibold hover:bg-slate-50"
-              >
-                <span className="flex items-center gap-1.5">
-                  <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
-                  Ver lançamentos detalhados do mês
-                </span>
-                <ArrowRight className="h-3 w-3 text-slate-400" />
-              </Button>
-            </div>
-
-            {currency === 'EUR' && (
-              <div className="pt-1 border-t border-slate-100 text-[10px] text-slate-400 flex items-center justify-between">
-                <span>Taxa de câmbio aplicada:</span>
-                <span className="font-medium text-slate-600">€ 1 = R$ {rate.toFixed(2)}</span>
-              </div>
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {/* MODAL DE AJUSTE MANUAL */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <PlusCircle className="h-5 w-5 text-blue-600" />
-              Ajustar Valor Real de {monthShort}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Altere o valor realizado para <strong>{effectiveName}</strong>. Um lançamento de
-              ajuste contábil será registrado sem corromper transações existentes.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSaveAdjustment} className="space-y-4 pt-1">
-            <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 text-xs">
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">
-                  Valor Atual ({currency})
-                </span>
-                <div className="font-bold text-slate-800 tabular-nums">
-                  {formatCurrency(value, currency, rate)}
-                </div>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">
-                  Mês de Referência
-                </span>
-                <div className="font-bold text-slate-800">{monthShort}</div>
-              </div>
-            </div>
-
-            {/* Target vs Delta selector */}
-            <div className="flex gap-1.5 p-1 bg-slate-100 rounded-lg text-xs font-medium">
-              <button
-                type="button"
-                onClick={() => setAdjType('target')}
-                className={`flex-1 py-1.5 rounded-md transition-all ${
-                  adjType === 'target'
-                    ? 'bg-white text-blue-700 shadow-xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Definir Novo Total
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdjType('increase')}
-                className={`flex-1 py-1.5 rounded-md transition-all ${
-                  adjType === 'increase'
-                    ? 'bg-white text-emerald-700 shadow-xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                + Adicionar Gasto
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdjType('decrease')}
-                className={`flex-1 py-1.5 rounded-md transition-all ${
-                  adjType === 'decrease'
-                    ? 'bg-white text-rose-700 shadow-xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                - Abater / Estorno
-              </button>
-            </div>
-
-            {adjType === 'target' ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="target-input" className="text-xs font-semibold text-slate-700">
-                  Novo Total Realizado ({currency})
-                </Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-medium">
-                    {currency === 'BRL' ? 'R$' : '€'}
-                  </span>
-                  <Input
-                    id="target-input"
-                    type="text"
-                    value={targetAmountInput}
-                    onChange={(e) => setTargetAmountInput(e.target.value)}
-                    placeholder="0,00"
-                    className="pl-8 text-sm font-semibold tabular-nums"
-                    autoFocus
-                    required
-                  />
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Diferença a ser criada:{' '}
-                  <strong className="text-slate-800">
-                    {(() => {
-                      const tgt = parseAmount(targetAmountInput)
-                      const diff = tgt - currentDisplayAmount
-                      const sign = diff >= 0 ? '+' : ''
-                      return `${sign}${currency === 'BRL' ? 'R$ ' : '€ '}${diff.toLocaleString(
-                        'pt-BR',
-                        { minimumFractionDigits: 2, maximumFractionDigits: 2 },
-                      )}`
-                    })()}
-                  </strong>
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label htmlFor="delta-input" className="text-xs font-semibold text-slate-700">
-                  {adjType === 'increase' ? 'Valor a Adicionar' : 'Valor a Abater'} ({currency})
-                </Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-medium">
-                    {currency === 'BRL' ? 'R$' : '€'}
-                  </span>
-                  <Input
-                    id="delta-input"
-                    type="text"
-                    value={deltaAmountInput}
-                    onChange={(e) => setDeltaAmountInput(e.target.value)}
-                    placeholder="0,00"
-                    className="pl-8 text-sm font-semibold tabular-nums"
-                    autoFocus
-                    required
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="adj-desc" className="text-xs font-semibold text-slate-700">
-                Descrição do Ajuste (opcional)
-              </Label>
-              <Input
-                id="adj-desc"
-                type="text"
-                value={adjDescription}
-                onChange={(e) => setAdjDescription(e.target.value)}
-                placeholder="Ex: Ajuste contábil manual, acerto de extrato..."
-                className="text-xs"
-              />
-            </div>
-
-            {currency === 'EUR' && (
-              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Você está visualizando em <strong>EUR</strong>. O valor digitado será convertido
-                  pela taxa do mês (€ 1 = R$ {rate.toFixed(2)}) e salvo em BRL no banco.
-                </span>
-              </div>
-            )}
-
-            <DialogFooter className="pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDialogOpen(false)}
-                disabled={isSubmitting}
-                className="text-xs"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className="bg-blue-600 hover:bg-blue-700 text-xs font-semibold"
-              >
-                {isSubmitting ? 'Salvando...' : 'Confirmar Ajuste'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+          <span>Clique para editar o Real ({currency})</span>
+          {currency === 'EUR' && (
+            <span className="block text-[10px] text-slate-300">
+              Câmbio: € 1 = R$ {rate.toFixed(2)}
+            </span>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }

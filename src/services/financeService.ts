@@ -234,6 +234,89 @@ export async function deleteTransaction(id: string): Promise<void> {
   await pb.collection('transactions').delete(id)
 }
 
+/**
+ * Ajusta o valor real contábil de uma categoria/subcategoria em um mês específico.
+ * Semântica contábil limpa:
+ * 1. Busca todos os lançamentos do usuário naquele mês para aquela categoria.
+ * 2. Calcula a soma dos lançamentos NÃO manuais (ex: importado/extrato).
+ * 3. Identifica se já existem lançamentos manuais de ajuste do mês nessa categoria.
+ * 4. Calcula o delta necessário = novoTotalBrl - somaNaoManuais.
+ * 5. Se o delta for ~0 (ou seja, a soma natural já iguala o novoTotal):
+ *    - Deleta qualquer lançamento manual pré-existente (sem resíduos).
+ * 6. Se o delta for diferente de 0:
+ *    - Se já existir um lançamento manual, atualiza o primeiro com o valor exato (delta)
+ *      e deleta eventuais lançamentos manuais excedentes/duplicados.
+ *    - Se não existir nenhum manual, cria um único lançamento com o delta exato.
+ * Desta forma, NUNCA acumula lançamentos +81 e -81, mantendo a soma rigorosamente igual a novoTotalBrl.
+ */
+export async function setActualCategoryMonthlyTotal(params: {
+  categoryId: string
+  month: string
+  newTotalBrl: number
+  description?: string
+}): Promise<void> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  const { categoryId, month, newTotalBrl, description } = params
+  const m = month.slice(0, 7)
+
+  // Buscar transações da categoria nesse mês
+  const txList = await pb.collection('transactions').getFullList<Transaction>({
+    filter: `user='${userId}' && category='${categoryId}' && month='${m}'`,
+    sort: 'created',
+  })
+
+  // Separar manuais de outras origens (importados/extratos)
+  const nonManualTxs = txList.filter((t) => t.source !== 'manual')
+  const manualTxs = txList.filter((t) => t.source === 'manual')
+
+  const nonManualSum = nonManualTxs.reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+  const neededAdjustment = Number((newTotalBrl - nonManualSum).toFixed(2))
+
+  const defaultDesc = description?.trim() || `Ajuste contábil (${m})`
+
+  // Caso 1: O ajuste necessário é nulo (ou desprezível < 0.005)
+  if (Math.abs(neededAdjustment) < 0.005) {
+    // Remover quaisquer transações manuais existentes para zerar o ajuste
+    for (const mTx of manualTxs) {
+      await pb.collection('transactions').delete(mTx.id)
+    }
+    return
+  }
+
+  // Caso 2: Já existe(m) transação(ões) manual(is)
+  if (manualTxs.length > 0) {
+    const primary = manualTxs[0]
+    await pb.collection('transactions').update<Transaction>(primary.id, {
+      amount: neededAdjustment,
+      description: defaultDesc,
+      date: primary.date || `${m}-01`,
+      month: m,
+    })
+
+    // Se existirem manuais duplicadas antigas, remove-as para sanear a base
+    for (let i = 1; i < manualTxs.length; i++) {
+      try {
+        await pb.collection('transactions').delete(manualTxs[i].id)
+      } catch (err) {
+        console.warn('Erro ao limpar ajuste manual duplicado:', err)
+      }
+    }
+  } else {
+    // Caso 3: Não existe nenhuma transação manual — cria uma única com o delta
+    await pb.collection('transactions').create<Transaction>({
+      user: userId,
+      category: categoryId,
+      amount: neededAdjustment,
+      source: 'manual',
+      date: `${m}-01`,
+      month: m,
+      description: defaultDesc,
+    })
+  }
+}
+
 // ==================== INCOME ====================
 export async function getIncomes(filter?: string): Promise<Income[]> {
   return await pb.collection('income').getFullList<Income>({

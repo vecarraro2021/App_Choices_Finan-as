@@ -10,6 +10,7 @@ import {
   getExchangeRates,
   getRateForMonth,
   createTransaction,
+  setActualCategoryMonthlyTotal,
 } from '@/services/financeService'
 import { Category, Transaction, MonthlyTotal, ExchangeRate } from '@/types/finance'
 import { InlineEstimateCell, InlineActualCell } from '@/components/InlineBudgetEditCell'
@@ -393,6 +394,31 @@ export default function BudgetVsActualView() {
     }
   }
 
+  // Inline save for actual value in a subcategory / month cell
+  const handleInlineSaveActual = async (
+    categoryId: string,
+    month: string,
+    newTotalBrl: number,
+    label?: string,
+  ) => {
+    try {
+      await setActualCategoryMonthlyTotal({
+        categoryId,
+        month,
+        newTotalBrl,
+        description: `Ajuste contábil em ${label || 'categoria'} (${formatMonthShort(month)})`,
+      })
+      toast({
+        title: 'Valor Real atualizado!',
+        description: `Total de ${formatMonthShort(month)} definido como ${formatCurrency(newTotalBrl, currency)}.`,
+      })
+      loadData()
+    } catch (err) {
+      console.error('Erro ao atualizar valor real inline:', err)
+      throw err
+    }
+  }
+
   // Create manual adjustment transaction when user edits Real cell
   const handleCreateAdjustmentTx = async (data: {
     date: string
@@ -657,6 +683,10 @@ export default function BudgetVsActualView() {
                                   categoryId={row.id}
                                   categoryName={row.name}
                                   isOverBudget={isOver}
+                                  editable={false}
+                                  onSaveTotal={(val) =>
+                                    handleInlineSaveActual(row.id, m, val, row.name)
+                                  }
                                   onCreateAdjustmentTx={handleCreateAdjustmentTx}
                                   onAdjustmentCreated={loadData}
                                 />
@@ -774,6 +804,15 @@ export default function BudgetVsActualView() {
                                       categoryName={row.name}
                                       subCategoryId={sub.id}
                                       subCategoryName={sub.name}
+                                      editable={true}
+                                      onSaveTotal={(val) =>
+                                        handleInlineSaveActual(
+                                          sub.id,
+                                          m,
+                                          val,
+                                          `${row.name} › ${sub.name}`,
+                                        )
+                                      }
                                       onCreateAdjustmentTx={handleCreateAdjustmentTx}
                                       onAdjustmentCreated={loadData}
                                     />
