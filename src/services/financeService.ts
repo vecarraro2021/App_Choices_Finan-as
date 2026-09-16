@@ -62,7 +62,11 @@ export function convertBrlToEur(
   return rate > 0 ? amountBrl / rate : amountBrl / EUR_EXCHANGE_RATE
 }
 
-export async function upsertExchangeRate(month: string, rate: number): Promise<ExchangeRate> {
+export async function upsertExchangeRate(
+  month: string,
+  rate: number,
+  manualOverride: boolean = true,
+): Promise<ExchangeRate> {
   const userId = pb.authStore.record?.id
   const m = month.slice(0, 7)
 
@@ -82,6 +86,7 @@ export async function upsertExchangeRate(month: string, rate: number): Promise<E
       const existing = existingList[0]
       return await pb.collection('exchange_rates').update<ExchangeRate>(existing.id, {
         rate,
+        manual_override: manualOverride,
         user: userId || undefined,
       })
     }
@@ -93,16 +98,57 @@ export async function upsertExchangeRate(month: string, rate: number): Promise<E
   return await pb.collection('exchange_rates').create<ExchangeRate>({
     month: m,
     rate,
+    manual_override: manualOverride,
     user: userId || undefined,
   })
 }
 
 export async function bulkUpsertExchangeRates(
-  rates: Array<{ month: string; rate: number }>,
+  rates: Array<{ month: string; rate: number; manualOverride?: boolean }>,
 ): Promise<void> {
   for (const item of rates) {
-    await upsertExchangeRate(item.month, item.rate)
+    await upsertExchangeRate(
+      item.month,
+      item.rate,
+      item.manualOverride !== undefined ? item.manualOverride : true,
+    )
   }
+}
+
+/**
+ * Força a re-sincronização do mês no servidor a partir da API Frankfurter,
+ * limpando o manual_override e recalculando a média oficial.
+ */
+export async function syncExchangeRatesFromServer(options?: {
+  month?: string
+  year?: number
+  force?: boolean
+}): Promise<{
+  success: boolean
+  updated: Array<{ month: string; rate: number; overridden: boolean }>
+}> {
+  const token = pb.authStore.token
+  const baseUrl = pb.baseURL || ''
+
+  const res = await fetch(`${baseUrl}/backend/v1/exchange-rates/sync`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      month: options?.month,
+      year: options?.year,
+      force: options?.force !== undefined ? options.force : true,
+    }),
+  })
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null)
+    throw new Error(errorData?.error || `Falha ao sincronizar taxas (status ${res.status})`)
+  }
+
+  return await res.json()
 }
 
 // ==================== CATEGORIES ====================

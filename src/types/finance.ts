@@ -7,6 +7,7 @@ export interface ExchangeRate {
   user?: string
   month: string // 'YYYY-MM'
   rate: number
+  manual_override?: boolean
   created?: string
   updated?: string
 }

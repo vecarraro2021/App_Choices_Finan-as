@@ -5,23 +5,21 @@ import {
   getExchangeRates,
   upsertExchangeRate,
   bulkUpsertExchangeRates,
-  getRateForMonth,
+  syncExchangeRatesFromServer,
 } from '@/services/financeService'
 import { ExchangeRate, EUR_EXCHANGE_RATE } from '@/types/finance'
-import { MONTH_NAMES_LONG, MONTH_NAMES_SHORT } from '@/lib/formatters'
+import { MONTH_NAMES_LONG } from '@/lib/formatters'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ArrowLeftRight,
   Save,
-  CheckCircle2,
-  Sparkles,
   Info,
   Calendar,
-  Layers,
   TrendingUp,
-  Percent,
   RefreshCw,
   Sliders,
+  RotateCcw,
+  Bot,
+  UserCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +37,8 @@ export default function ExchangeRatesView() {
   const [selectedYear, setSelectedYear] = useState<number>(2026)
   const [editedRates, setEditedRates] = useState<Record<string, string>>({})
   const [savingMonth, setSavingMonth] = useState<string | null>(null)
+  const [syncingMonth, setSyncingMonth] = useState<string | null>(null)
+  const [syncingYear, setSyncingYear] = useState(false)
   const [globalRateInput, setGlobalRateInput] = useState<string>('6.00')
   const [applyingGlobal, setApplyingGlobal] = useState(false)
 
@@ -103,10 +103,10 @@ export default function ExchangeRatesView() {
 
     try {
       setSavingMonth(m)
-      await upsertExchangeRate(m, Number(num.toFixed(4)))
+      await upsertExchangeRate(m, Number(num.toFixed(4)), true)
       toast({
-        title: 'Taxa atualizada!',
-        description: `Câmbio para ${m} definido como R$ ${num.toFixed(2)} / € 1.`,
+        title: 'Taxa atualizada manualmente!',
+        description: `Câmbio para ${m} fixado em R$ ${num.toFixed(2)} / € 1 (marcado como ajuste manual).`,
       })
       await loadData()
     } catch (err: any) {
@@ -118,6 +118,56 @@ export default function ExchangeRatesView() {
       })
     } finally {
       setSavingMonth(null)
+    }
+  }
+
+  // Revert month to automatic Frankfurter rate via server endpoint
+  const handleRevertToAutomatic = async (m: string) => {
+    try {
+      setSyncingMonth(m)
+      const res = await syncExchangeRatesFromServer({ month: m, force: true })
+      const updatedItem = res.updated?.find((u) => u.month === m)
+      const rateVal = updatedItem ? updatedItem.rate : null
+
+      toast({
+        title: 'Taxa redefinida para automático!',
+        description: rateVal
+          ? `Mês ${m} sincronizado com Banco Central Europeu: R$ ${rateVal.toFixed(2)} / € 1.`
+          : `Mês ${m} re-sincronizado com a Frankfurter com sucesso.`,
+      })
+      await loadData()
+    } catch (err: any) {
+      console.error(err)
+      toast({
+        title: 'Erro ao sincronizar taxa automática',
+        description: err.message || 'Falha ao consultar cotação oficial no servidor.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSyncingMonth(null)
+    }
+  }
+
+  // Force sync entire year from Frankfurter API
+  const handleSyncEntireYear = async () => {
+    try {
+      setSyncingYear(true)
+      const res = await syncExchangeRatesFromServer({ year: selectedYear, force: false })
+      const count = res.updated?.length || 0
+      toast({
+        title: 'Sincronização concluída!',
+        description: `${count} mês(es) de ${selectedYear} atualizados com cotações oficiais do BCE. Meses com ajuste manual foram preservados.`,
+      })
+      await loadData()
+    } catch (err: any) {
+      console.error(err)
+      toast({
+        title: 'Erro ao sincronizar ano',
+        description: err.message || 'Falha ao buscar cotações da Frankfurter.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSyncingYear(false)
     }
   }
 
@@ -210,11 +260,24 @@ export default function ExchangeRatesView() {
 
           <Button
             variant="outline"
+            onClick={handleSyncEntireYear}
+            disabled={syncingYear || loading}
+            title="Sincronizar cotações do ano com a Frankfurter API (BCE)"
+            className="border-blue-300 text-blue-700 hover:bg-blue-50 h-9 text-xs font-semibold"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 mr-1.5 ${syncingYear ? 'animate-spin text-blue-600' : ''}`}
+            />
+            {syncingYear ? 'Sincronizando BCE...' : `Sincronizar ${selectedYear}`}
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={loadData}
             disabled={loading}
             className="border-slate-300 hover:bg-slate-100 h-9"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-slate-600' : ''}`} />
           </Button>
         </div>
       </div>
@@ -339,15 +402,19 @@ export default function ExchangeRatesView() {
               const savedRec = rates.find((r) => r.month === m)
               const savedRate = savedRec?.rate ? Number(savedRec.rate) : EUR_EXCHANGE_RATE
               const hasDiff = parseFloat(currentInput.replace(',', '.')) !== savedRate
+              const isManual = Boolean(savedRec?.manual_override)
               const isSaving = savingMonth === m
+              const isSyncing = syncingMonth === m
 
               return (
                 <div
                   key={m}
                   className={`p-3.5 rounded-xl border transition-all ${
                     hasDiff
-                      ? 'border-amber-300 bg-amber-50/30'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
+                      ? 'border-amber-300 bg-amber-50/40 shadow-xs'
+                      : isManual
+                        ? 'border-orange-200 bg-orange-50/20 shadow-xs'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -355,12 +422,34 @@ export default function ExchangeRatesView() {
                       <Calendar className="h-3.5 w-3.5 text-blue-600" />
                       <span className="text-xs font-bold text-slate-900">{monthName}</span>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0"
-                    >
-                      {m}
-                    </Badge>
+
+                    <div className="flex items-center gap-1">
+                      {isManual ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] bg-orange-100 text-orange-800 border-orange-300 font-medium px-1.5 py-0 flex items-center gap-1"
+                          title="Taxa ajustada manualmente pelo usuário"
+                        >
+                          <UserCheck className="h-2.5 w-2.5 text-orange-600" />
+                          Manual
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300 font-medium px-1.5 py-0 flex items-center gap-1"
+                          title="Taxa calculada automaticamente via API Frankfurter (BCE)"
+                        >
+                          <Bot className="h-2.5 w-2.5 text-emerald-600" />
+                          Automática
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1 py-0"
+                      >
+                        {m}
+                      </Badge>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -372,7 +461,9 @@ export default function ExchangeRatesView() {
                           type="text"
                           value={currentInput}
                           onChange={(e) => handleRateChange(m, e.target.value)}
-                          className="h-8 pl-7 text-xs font-bold tabular-nums"
+                          className={`h-8 pl-7 text-xs font-bold tabular-nums ${
+                            isManual ? 'border-orange-300 focus:border-orange-500' : ''
+                          }`}
                         />
                       </div>
                     </div>
@@ -381,8 +472,8 @@ export default function ExchangeRatesView() {
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="cursor-help text-slate-500 hover:text-slate-800">
-                              Exemplo: € 1.000 ={' '}
+                            <span className="cursor-help text-slate-500 hover:text-slate-800 truncate max-w-[130px]">
+                              € 1.000 ={' '}
                               <strong className="text-slate-700">
                                 R${' '}
                                 {(
@@ -392,24 +483,43 @@ export default function ExchangeRatesView() {
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className="text-xs">
-                            Cada lançamento deste mês será convertido por este multiplicador.
+                            Cada lançamento deste mês será multiplicado por R${' '}
+                            {(parseFloat(currentInput.replace(',', '.')) || 6).toFixed(4)}.
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
 
-                      <Button
-                        size="sm"
-                        onClick={() => handleSaveMonth(m)}
-                        disabled={isSaving}
-                        className={`h-7 px-2.5 text-xs font-semibold ${
-                          hasDiff
-                            ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        <Save className="h-3 w-3 mr-1" />
-                        {isSaving ? 'Salvando...' : hasDiff ? 'Salvar' : 'Salvo'}
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {isManual && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRevertToAutomatic(m)}
+                            disabled={isSyncing || isSaving}
+                            title="Remover ajuste manual e re-buscar média oficial da Frankfurter"
+                            className="h-7 px-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 text-[11px]"
+                          >
+                            <RotateCcw
+                              className={`h-3 w-3 mr-1 ${isSyncing ? 'animate-spin' : ''}`}
+                            />
+                            {isSyncing ? 'Buscando...' : 'Auto'}
+                          </Button>
+                        )}
+
+                        <Button
+                          size="sm"
+                          onClick={() => handleSaveMonth(m)}
+                          disabled={isSaving || isSyncing}
+                          className={`h-7 px-2 text-xs font-semibold ${
+                            hasDiff
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <Save className="h-3 w-3 mr-1" />
+                          {isSaving ? 'Salvando...' : hasDiff ? 'Salvar' : 'Salvo'}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
