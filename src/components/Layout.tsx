@@ -14,7 +14,6 @@ import {
   Menu,
   X,
   Wallet,
-  ArrowLeftRight,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -33,7 +32,6 @@ const navItems = [
   { path: '/receitas', label: 'Receitas', icon: TrendingUp },
   { path: '/orcado-vs-realizado', label: 'Orçado vs Realizado', icon: Scale },
   { path: '/categorias', label: 'Categorias', icon: FolderTree },
-  { path: '/cambio', label: 'Câmbio Mensal', icon: ArrowLeftRight },
   { path: '/alertas', label: 'Alertas & Insights', icon: AlertTriangle },
 ]
 
@@ -215,10 +213,6 @@ export default function Layout() {
                 >
                   <FolderTree className="mr-2 h-4 w-4" />
                   Gerenciar Categorias
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/cambio')} className="cursor-pointer">
-                  <ArrowLeftRight className="mr-2 h-4 w-4 text-blue-600" />
-                  Taxas de Câmbio Mensais
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate('/alertas')} className="cursor-pointer">
                   <AlertTriangle className="mr-2 h-4 w-4" />

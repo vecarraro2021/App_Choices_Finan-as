@@ -35,7 +35,6 @@ import {
   Gift,
   PlusCircle,
   TrendingUp,
-  ArrowLeftRight,
   GripVertical,
   CornerDownRight,
   MoveRight,
@@ -468,15 +467,6 @@ export default function CategoriesView() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => navigate('/cambio')}
-            className="border-blue-200 text-blue-700 hover:bg-blue-50"
-          >
-            <ArrowLeftRight className="mr-2 h-4 w-4 text-blue-600" />
-            Tabela de Câmbio
-          </Button>
-
           <Button
             variant="outline"
             onClick={() => handleOpenAdd('sub')}
