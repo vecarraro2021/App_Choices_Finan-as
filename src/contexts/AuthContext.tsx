@@ -56,7 +56,165 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       emailVisibility: true,
     })
     await pb.collection('users').authWithPassword(email, pass)
-    setUser(pb.authStore.record)
+    const newRecord = pb.authStore.record
+    setUser(newRecord)
+
+    // Garantir que a árvore inicial de categorias do usuário esteja provisionada
+    if (newRecord?.id) {
+      try {
+        const existingCats = await pb.collection('categories').getFullList({
+          filter: `owner = '${newRecord.id}'`,
+          limit: 1,
+        })
+        if (existingCats.length === 0) {
+          const defaultTaxonomy = [
+            {
+              name: 'Moradia',
+              color: '#2563EB',
+              icon: 'Home',
+              subcategories: [
+                'Aluguel',
+                'Mercado',
+                'Internet',
+                'Luz',
+                'Água',
+                'Limpeza',
+                'Utensílios e Móveis',
+                'Lavanderia',
+                'Manutenção Residencial',
+              ],
+            },
+            {
+              name: 'Cuidados Pessoais',
+              color: '#EC4899',
+              icon: 'Heart',
+              subcategories: [
+                'Farmácia',
+                'Plano de Saúde',
+                'Exames e Consultas',
+                'Academia',
+                'Atividades Esportivas',
+                'Equipamentos e Manutenção',
+                'Terapias e Saúde Mental',
+                'Vestuário e Roupas',
+                'Salão e Cabelo',
+                'Beleza e Estética',
+                'Massagem',
+              ],
+            },
+            {
+              name: 'Transporte',
+              color: '#F59E0B',
+              icon: 'Car',
+              subcategories: [
+                'Combustível',
+                'Uber / Táxi',
+                'Seguro do Carro',
+                'Pedágios e Estacionamento',
+                'Manutenção do Carro',
+                'Inspeção e Impostos Auto',
+                'Aluguel ou Compra Automóvel',
+              ],
+            },
+            {
+              name: 'Lazer',
+              color: '#10B981',
+              icon: 'Coffee',
+              subcategories: [
+                'Restaurantes',
+                'Alimentação Fora',
+                'Eventos e Shows',
+                'Passagens Aéreas',
+                'Turismo e Hospedagem',
+                'Passagens Locais',
+              ],
+            },
+            {
+              name: 'Educação',
+              color: '#8B5CF6',
+              icon: 'BookOpen',
+              subcategories: ['Cursos Online', 'Mentorias', 'Materiais e Livros'],
+            },
+            {
+              name: 'Assinaturas',
+              color: '#06B6D4',
+              icon: 'Layers',
+              subcategories: [
+                'Streaming (Netflix, Spotify)',
+                'Armazenamento em Nuvem (Google, Apple)',
+                'Software e Ferramentas (Figma, Loom)',
+                'Inteligência Artificial (ChatGPT, Claude)',
+              ],
+            },
+            {
+              name: 'Impostos',
+              color: '#6366F1',
+              icon: 'FileText',
+              subcategories: ['Impostos Governamentais', 'Contribuições e Taxas Oficiais'],
+            },
+            {
+              name: 'Tarifas Financeiras',
+              color: '#F97316',
+              icon: 'CreditCard',
+              subcategories: ['Taxas Bancárias', 'Juros e Taxas Cartão', 'Seguro Pix / Conta'],
+            },
+            {
+              name: 'Serviços',
+              color: '#14B8A6',
+              icon: 'Briefcase',
+              subcategories: ['Contabilidade'],
+            },
+            {
+              name: 'Social',
+              color: '#84CC16',
+              icon: 'Gift',
+              subcategories: ['Presentes', 'Doações'],
+            },
+            {
+              name: 'Investimentos',
+              color: '#059669',
+              icon: 'TrendingUp',
+              subcategories: ['Investimentos', 'Degiro', 'Consorcio', 'Outros investimentos'],
+            },
+            {
+              name: 'Extras',
+              color: '#64748B',
+              icon: 'PlusCircle',
+              subcategories: [
+                'Eletrônicos',
+                'Material de Obra',
+                'Serviço de Obra',
+                'Não Categorizado',
+              ],
+            },
+          ]
+
+          for (const item of defaultTaxonomy) {
+            const parentCat = await pb.collection('categories').create({
+              name: item.name,
+              type: 'main',
+              estimated: 0,
+              color: item.color,
+              icon: item.icon,
+              owner: newRecord.id,
+            })
+
+            for (const sub of item.subcategories) {
+              await pb.collection('categories').create({
+                name: sub,
+                type: 'sub',
+                parent: parentCat.id,
+                estimated: 0,
+                color: item.color,
+                owner: newRecord.id,
+              })
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Bootstrap de categorias pós-registro:', err)
+      }
+    }
   }
 
   const logout = () => {

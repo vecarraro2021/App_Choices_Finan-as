@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-23T15:14:03.126Z",
+  "generatedAt": "2026-09-23T15:48:11.980Z",
   "collections": [
     {
       "name": "users",
@@ -48,11 +48,11 @@
       "name": "categories",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != ''",
-        "view": "@request.auth.id != ''",
-        "create": "@request.auth.id != ''",
-        "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "list": "@request.auth.id != '' && owner = @request.auth.id",
+        "view": "@request.auth.id != '' && owner = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.owner = @request.auth.id",
+        "update": "@request.auth.id != '' && owner = @request.auth.id",
+        "delete": "@request.auth.id != '' && owner = @request.auth.id"
       },
       "fields": [
         {
@@ -106,22 +106,30 @@
           "required": false,
           "system": false,
           "collectionRef": "categories"
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_categories_type ON categories (type)",
-        "CREATE INDEX `idx_categories_parent` ON `categories` (parent)"
+        "CREATE INDEX `idx_categories_parent` ON `categories` (parent)",
+        "CREATE INDEX `idx_categories_owner` ON `categories` (owner)"
       ]
     },
     {
       "name": "transactions",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' && user = @request.auth.id",
-        "view": "@request.auth.id != '' && user = @request.auth.id",
-        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
-        "update": "@request.auth.id != '' && user = @request.auth.id",
-        "delete": "@request.auth.id != '' && user = @request.auth.id"
+        "list": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -182,24 +190,32 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_transactions_user ON transactions (user)",
         "CREATE INDEX idx_transactions_month ON transactions (month)",
         "CREATE INDEX idx_transactions_category ON transactions (category)",
-        "CREATE INDEX idx_transactions_date ON transactions (date)"
+        "CREATE INDEX idx_transactions_date ON transactions (date)",
+        "CREATE INDEX `idx_transactions_owner` ON `transactions` (owner)"
       ]
     },
     {
       "name": "income",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' && user = @request.auth.id",
-        "view": "@request.auth.id != '' && user = @request.auth.id",
-        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
-        "update": "@request.auth.id != '' && user = @request.auth.id",
-        "delete": "@request.auth.id != '' && user = @request.auth.id"
+        "list": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -252,22 +268,30 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_income_user ON income (user)",
-        "CREATE INDEX idx_income_month ON income (month)"
+        "CREATE INDEX idx_income_month ON income (month)",
+        "CREATE INDEX `idx_income_owner` ON `income` (owner)"
       ]
     },
     {
       "name": "alerts",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' && user = @request.auth.id",
-        "view": "@request.auth.id != '' && user = @request.auth.id",
-        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
-        "update": "@request.auth.id != '' && user = @request.auth.id",
-        "delete": "@request.auth.id != '' && user = @request.auth.id"
+        "list": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -315,22 +339,30 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_alerts_user ON alerts (user)",
-        "CREATE INDEX idx_alerts_severity ON alerts (severity)"
+        "CREATE INDEX idx_alerts_severity ON alerts (severity)",
+        "CREATE INDEX `idx_alerts_owner` ON `alerts` (owner)"
       ]
     },
     {
       "name": "monthly_totals",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' && user = @request.auth.id",
-        "view": "@request.auth.id != '' && user = @request.auth.id",
-        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
-        "update": "@request.auth.id != '' && user = @request.auth.id",
-        "delete": "@request.auth.id != '' && user = @request.auth.id"
+        "list": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -377,22 +409,30 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_monthly_totals_user ON monthly_totals (user)",
-        "CREATE INDEX idx_monthly_totals_month ON monthly_totals (month)"
+        "CREATE INDEX idx_monthly_totals_month ON monthly_totals (month)",
+        "CREATE INDEX `idx_monthly_totals_owner` ON `monthly_totals` (owner)"
       ]
     },
     {
       "name": "recurring_incomes",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' && user = @request.auth.id",
-        "view": "@request.auth.id != '' && user = @request.auth.id",
-        "create": "@request.auth.id != '' && @request.body.user = @request.auth.id",
-        "update": "@request.auth.id != '' && user = @request.auth.id",
-        "delete": "@request.auth.id != '' && user = @request.auth.id"
+        "list": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -439,19 +479,29 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
-      "indexes": ["CREATE INDEX idx_recurring_incomes_user ON recurring_incomes (user)"]
+      "indexes": [
+        "CREATE INDEX idx_recurring_incomes_user ON recurring_incomes (user)",
+        "CREATE INDEX `idx_recurring_incomes_owner` ON `recurring_incomes` (owner)"
+      ]
     },
     {
       "name": "exchange_rates",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != ''",
-        "view": "@request.auth.id != ''",
-        "create": "@request.auth.id != ''",
-        "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "list": "@request.auth.id != '' && (owner = '' || owner = null || owner = @request.auth.id || user = '' || user = null || user = @request.auth.id)",
+        "view": "@request.auth.id != '' && (owner = '' || owner = null || owner = @request.auth.id || user = '' || user = null || user = @request.auth.id)",
+        "create": "@request.auth.id != '' && (@request.body.owner = @request.auth.id || @request.body.user = @request.auth.id)",
+        "update": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)",
+        "delete": "@request.auth.id != '' && (owner = @request.auth.id || user = @request.auth.id)"
       },
       "fields": [
         {
@@ -492,11 +542,19 @@
           "type": "bool",
           "required": false,
           "system": false
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_exchange_rates_month_user ON exchange_rates (month, user)",
-        "CREATE INDEX idx_exchange_rates_month ON exchange_rates (month)"
+        "CREATE INDEX idx_exchange_rates_month ON exchange_rates (month)",
+        "CREATE INDEX `idx_exchange_rates_owner` ON `exchange_rates` (owner)"
       ]
     },
     {
@@ -549,6 +607,13 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
         }
       ],
       "indexes": [

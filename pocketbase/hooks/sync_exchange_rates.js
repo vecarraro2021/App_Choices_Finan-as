@@ -63,10 +63,10 @@ cronAdd('sync_exchange_rates_daily', '15 3 * * *', () => {
       const sum = arr.reduce((acc, val) => acc + val, 0)
       const avg = Number((sum / arr.length).toFixed(4))
 
-      // Buscar registros existentes para esse mês
+      // Buscar registros existentes globais para esse mês (sem dono específico)
       const existingRecords = $app.findRecordsByFilter(
         'exchange_rates',
-        `month = '${m}'`,
+        `month = '${m}' && (owner = '' || owner = null) && (user = '' || user = null)`,
         '-created',
         10,
         0,
@@ -75,7 +75,7 @@ cronAdd('sync_exchange_rates_daily', '15 3 * * *', () => {
       if (existingRecords.length > 0) {
         for (let j = 0; j < existingRecords.length; j++) {
           const rec = existingRecords[j]
-          // Não sobrescrever taxas que o usuário marcou como ajuste manual
+          // Não sobrescrever se marcado manual_override
           if (rec.getBool('manual_override')) {
             console.log(`[exchange_rates_cron] Mês ${m} ignorado devido a manual_override=true`)
             continue
@@ -91,6 +91,8 @@ cronAdd('sync_exchange_rates_daily', '15 3 * * *', () => {
         rec.set('month', m)
         rec.set('rate', avg)
         rec.set('manual_override', false)
+        rec.set('owner', null)
+        rec.set('user', null)
         $app.save(rec)
         console.log(`[exchange_rates_cron] Mês ${m} criado com taxa média ${avg}`)
       }
@@ -180,7 +182,7 @@ routerAdd(
 
         const existingRecords = $app.findRecordsByFilter(
           'exchange_rates',
-          `month = '${m}'`,
+          `month = '${m}' && (owner = '' || owner = null) && (user = '' || user = null)`,
           '-created',
           10,
           0,
@@ -202,6 +204,8 @@ routerAdd(
           rec.set('month', m)
           rec.set('rate', avg)
           rec.set('manual_override', false)
+          rec.set('owner', null)
+          rec.set('user', null)
           $app.save(rec)
           updatedMonths.push({ month: m, rate: avg, overridden: false })
         }
@@ -300,7 +304,7 @@ onBootstrap((e) => {
 
         const existingRecords = $app.findRecordsByFilter(
           'exchange_rates',
-          `month = '${m}'`,
+          `month = '${m}' && (owner = '' || owner = null) && (user = '' || user = null)`,
           '-created',
           10,
           0,
@@ -322,6 +326,8 @@ onBootstrap((e) => {
           rec.set('month', m)
           rec.set('rate', avg)
           rec.set('manual_override', false)
+          rec.set('owner', null)
+          rec.set('user', null)
           $app.save(rec)
         }
       }

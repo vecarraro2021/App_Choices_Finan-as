@@ -5,6 +5,7 @@ export const EUR_EXCHANGE_RATE = 6.0
 export interface ExchangeRate {
   id: string
   user?: string
+  owner?: string
   month: string // 'YYYY-MM'
   rate: number
   manual_override?: boolean
@@ -14,6 +15,7 @@ export interface ExchangeRate {
 
 export interface Category {
   id: string
+  owner?: string
   name: string
   type: 'main' | 'sub'
   parent?: string
@@ -30,6 +32,7 @@ export interface Category {
 export interface Transaction {
   id: string
   user: string
+  owner?: string
   date: string // YYYY-MM-DD
   description: string
   amount: number // Stored in BRL
@@ -46,6 +49,7 @@ export interface Transaction {
 export interface Income {
   id: string
   user: string
+  owner?: string
   month: string // YYYY-MM
   amount_brl: number
   amount_eur?: number
@@ -58,6 +62,7 @@ export interface Income {
 export interface RecurringIncome {
   id: string
   user: string
+  owner?: string
   description: string
   amount_eur: number
   amount_brl: number
@@ -69,6 +74,7 @@ export interface RecurringIncome {
 export interface Alert {
   id: string
   user: string
+  owner?: string
   severity: 'critical' | 'warning' | 'info'
   title: string
   description: string
@@ -80,6 +86,7 @@ export interface Alert {
 export interface MonthlyTotal {
   id: string
   user: string
+  owner?: string
   month: string // YYYY-MM
   total_categories?: number
   total_official?: number

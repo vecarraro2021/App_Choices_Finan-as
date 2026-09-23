@@ -12,7 +12,12 @@ import {
 
 // ==================== EXCHANGE RATES ====================
 export async function getExchangeRates(): Promise<ExchangeRate[]> {
+  const userId = pb.authStore.record?.id
+  const filter = userId
+    ? `(owner = '' || owner = null || owner = '${userId}' || user = '' || user = null || user = '${userId}')`
+    : undefined
   return await pb.collection('exchange_rates').getFullList<ExchangeRate>({
+    filter,
     sort: 'month',
   })
 }
@@ -70,36 +75,37 @@ export async function upsertExchangeRate(
   const userId = pb.authStore.record?.id
   const m = month.slice(0, 7)
 
-  // Try finding existing record for this month (user-specific or global)
+  // Try finding existing record for this month for THIS user specifically
   try {
-    let filter = `month = '${m}'`
     if (userId) {
-      filter += ` && (user = '${userId}' || user = null || user = '')`
-    }
-    const existingList = await pb.collection('exchange_rates').getFullList<ExchangeRate>({
-      filter,
-      sort: '-user,-created',
-      limit: 1,
-    })
-
-    if (existingList.length > 0) {
-      const existing = existingList[0]
-      return await pb.collection('exchange_rates').update<ExchangeRate>(existing.id, {
-        rate,
-        manual_override: manualOverride,
-        user: userId || undefined,
+      const filter = `month = '${m}' && (owner = '${userId}' || user = '${userId}')`
+      const existingList = await pb.collection('exchange_rates').getFullList<ExchangeRate>({
+        filter,
+        sort: '-created',
+        limit: 1,
       })
+
+      if (existingList.length > 0) {
+        const existing = existingList[0]
+        return await pb.collection('exchange_rates').update<ExchangeRate>(existing.id, {
+          rate,
+          manual_override: manualOverride,
+          user: userId,
+          owner: userId,
+        })
+      }
     }
   } catch {
     /* intentionally ignored */
   }
 
-  // Create new
+  // Create new user-specific exchange rate override
   return await pb.collection('exchange_rates').create<ExchangeRate>({
     month: m,
     rate,
     manual_override: manualOverride,
     user: userId || undefined,
+    owner: userId || undefined,
   })
 }
 
@@ -153,7 +159,10 @@ export async function syncExchangeRatesFromServer(options?: {
 
 // ==================== CATEGORIES ====================
 export async function getCategories(): Promise<Category[]> {
+  const userId = pb.authStore.record?.id
+  const filter = userId ? `owner = '${userId}'` : undefined
   const records = await pb.collection('categories').getFullList<Category>({
+    filter,
     sort: 'name',
     expand: 'parent',
   })
@@ -161,7 +170,11 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function createCategory(data: Partial<Category>): Promise<Category> {
-  return await pb.collection('categories').create<Category>(data)
+  const userId = pb.authStore.record?.id
+  return await pb.collection('categories').create<Category>({
+    ...data,
+    owner: userId || data.owner,
+  })
 }
 
 export async function updateCategory(id: string, data: Partial<Category>): Promise<Category> {
@@ -169,10 +182,14 @@ export async function updateCategory(id: string, data: Partial<Category>): Promi
 }
 
 export async function deleteCategory(id: string, reassignToId?: string): Promise<void> {
+  const userId = pb.authStore.record?.id
   if (reassignToId) {
-    // Reassign transactions using this category
+    // Reassign transactions using this category for current user
+    const filter = userId
+      ? `(owner = '${userId}' || user = '${userId}') && category = '${id}'`
+      : `category = '${id}'`
     const transactions = await pb.collection('transactions').getFullList({
-      filter: `category = '${id}'`,
+      filter,
     })
     for (const tx of transactions) {
       await pb.collection('transactions').update(tx.id, { category: reassignToId })
@@ -189,8 +206,12 @@ export async function getTransactions(options?: {
   page?: number
   perPage?: number
 }): Promise<{ items: Transaction[]; totalItems: number; totalPages: number }> {
+  const userId = pb.authStore.record?.id
   const filters: string[] = []
 
+  if (userId) {
+    filters.push(`(owner = '${userId}' || user = '${userId}')`)
+  }
   if (options?.month) {
     filters.push(`month = '${options.month}'`)
   }
@@ -217,8 +238,16 @@ export async function getTransactions(options?: {
 }
 
 export async function getAllTransactions(filter?: string): Promise<Transaction[]> {
+  const userId = pb.authStore.record?.id
+  const userFilter = userId ? `(owner = '${userId}' || user = '${userId}')` : ''
+  const effectiveFilter = filter
+    ? userFilter
+      ? `(${userFilter}) && (${filter})`
+      : filter
+    : userFilter || undefined
+
   return await pb.collection('transactions').getFullList<Transaction>({
-    filter,
+    filter: effectiveFilter,
     sort: '-date',
     expand: 'category,category.parent',
   })
@@ -238,6 +267,7 @@ export async function createTransaction(data: {
   return await pb.collection('transactions').create<Transaction>({
     ...data,
     user: userId,
+    owner: userId,
   })
 }
 
@@ -260,6 +290,7 @@ export async function createTransactionsBatch(
       await pb.collection('transactions').create({
         ...item,
         user: userId,
+        owner: userId,
       })
       successCount++
     } catch (e) {
@@ -309,7 +340,7 @@ export async function setActualCategoryMonthlyTotal(params: {
 
   // Buscar transações da categoria nesse mês
   const txList = await pb.collection('transactions').getFullList<Transaction>({
-    filter: `user='${userId}' && category='${categoryId}' && month='${m}'`,
+    filter: `(owner='${userId}' || user='${userId}') && category='${categoryId}' && month='${m}'`,
     sort: 'created',
   })
 
@@ -353,6 +384,7 @@ export async function setActualCategoryMonthlyTotal(params: {
     // Caso 3: Não existe nenhuma transação manual — cria uma única com o delta
     await pb.collection('transactions').create<Transaction>({
       user: userId,
+      owner: userId,
       category: categoryId,
       amount: neededAdjustment,
       source: 'manual',
@@ -365,8 +397,16 @@ export async function setActualCategoryMonthlyTotal(params: {
 
 // ==================== INCOME ====================
 export async function getIncomes(filter?: string): Promise<Income[]> {
+  const userId = pb.authStore.record?.id
+  const userFilter = userId ? `(owner = '${userId}' || user = '${userId}')` : ''
+  const effectiveFilter = filter
+    ? userFilter
+      ? `(${userFilter}) && (${filter})`
+      : filter
+    : userFilter || undefined
+
   return await pb.collection('income').getFullList<Income>({
-    filter,
+    filter: effectiveFilter,
     sort: '-month,-date',
   })
 }
@@ -384,6 +424,7 @@ export async function createIncome(data: {
   return await pb.collection('income').create<Income>({
     ...data,
     user: userId,
+    owner: userId,
   })
 }
 
@@ -397,8 +438,16 @@ export async function deleteIncome(id: string): Promise<void> {
 
 // ==================== RECURRING INCOMES ====================
 export async function getRecurringIncomes(filter?: string): Promise<RecurringIncome[]> {
+  const userId = pb.authStore.record?.id
+  const userFilter = userId ? `(owner = '${userId}' || user = '${userId}')` : ''
+  const effectiveFilter = filter
+    ? userFilter
+      ? `(${userFilter}) && (${filter})`
+      : filter
+    : userFilter || undefined
+
   return await pb.collection('recurring_incomes').getFullList<RecurringIncome>({
-    filter,
+    filter: effectiveFilter,
     sort: '-created',
   })
 }
@@ -416,6 +465,7 @@ export async function createRecurringIncome(data: {
     ...data,
     active: data.active !== undefined ? data.active : true,
     user: userId,
+    owner: userId,
   })
 }
 
@@ -472,7 +522,10 @@ export function calculateMonthIncome(
 
 // ==================== MONTHLY TOTALS ====================
 export async function getMonthlyTotals(): Promise<MonthlyTotal[]> {
+  const userId = pb.authStore.record?.id
+  const filter = userId ? `(owner = '${userId}' || user = '${userId}')` : undefined
   return await pb.collection('monthly_totals').getFullList<MonthlyTotal>({
+    filter,
     sort: 'month',
   })
 }
@@ -487,19 +540,24 @@ export async function upsertMonthlyTotal(data: {
   if (!userId) throw new Error('Usuário não autenticado')
 
   try {
-    const existing = await pb.collection('monthly_totals').getFirstListItem(`month='${data.month}'`)
+    const filter = `(owner = '${userId}' || user = '${userId}') && month='${data.month}'`
+    const existing = await pb.collection('monthly_totals').getFirstListItem(filter)
     return await pb.collection('monthly_totals').update<MonthlyTotal>(existing.id, data)
   } catch (_) {
     return await pb.collection('monthly_totals').create<MonthlyTotal>({
       ...data,
       user: userId,
+      owner: userId,
     })
   }
 }
 
 // ==================== ALERTS ====================
 export async function getAlerts(): Promise<Alert[]> {
+  const userId = pb.authStore.record?.id
+  const filter = userId ? `(owner = '${userId}' || user = '${userId}')` : undefined
   return await pb.collection('alerts').getFullList<Alert>({
+    filter,
     sort: '-created',
   })
 }
@@ -765,7 +823,7 @@ export async function importPlanningData(params: {
   if (params.replaceExisting) {
     for (const monthStr of targetMonths) {
       const existing = await pb.collection('transactions').getFullList({
-        filter: `user='${userId}' && source='importado' && month='${monthStr}'`,
+        filter: `(owner='${userId}' || user='${userId}') && source='importado' && month='${monthStr}'`,
       })
       for (const tx of existing) {
         try {
@@ -846,7 +904,7 @@ export async function clearAndSaveAlerts(
 
   // Clear existing alerts for this user
   const existing = await pb.collection('alerts').getFullList({
-    filter: `user='${userId}'`,
+    filter: `owner='${userId}' || user='${userId}'`,
   })
 
   for (const item of existing) {
@@ -863,6 +921,7 @@ export async function clearAndSaveAlerts(
       await pb.collection('alerts').create({
         ...item,
         user: userId,
+        owner: userId,
       })
     } catch {
       /* intentionally ignored */
