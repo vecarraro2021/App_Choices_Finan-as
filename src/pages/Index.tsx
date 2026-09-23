@@ -267,19 +267,11 @@ export default function Index() {
       {/* Executive Summary Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resumo Executivo</h1>
-            <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50 text-xs">
-              Planejamento 2026
-            </Badge>
-            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-medium hidden sm:inline-flex">
-              Moeda Oficial: R$ (BRL)
-            </Badge>
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resumo Executivo</h1>
           <p className="text-sm text-slate-500 mt-1">
             Consolidado analítico com conversão automática de cada lançamento pela taxa média do mês
             correspondente.
-          </p>{' '}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -289,13 +281,6 @@ export default function Index() {
           >
             <UploadCloud className="mr-2 h-4 w-4" />
             Importar Extratos
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate('/orcado-vs-realizado')}
-            className="border-slate-300 hover:bg-slate-100"
-          >
-            Matriz Orçado vs Real
           </Button>
         </div>
       </div>
