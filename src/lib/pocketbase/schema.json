@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-23T15:48:11.980Z",
+  "generatedAt": "2026-09-23T16:12:49.368Z",
   "collections": [
     {
       "name": "users",
@@ -197,6 +197,13 @@
           "required": false,
           "system": false,
           "collectionRef": "users"
+        },
+        {
+          "name": "amount_currency",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["BRL", "EUR"]
         }
       ],
       "indexes": [

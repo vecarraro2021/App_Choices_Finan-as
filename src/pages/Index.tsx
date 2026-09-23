@@ -128,10 +128,17 @@ export default function Index() {
     const monthsCount = hasTransactions ? Math.max(monthsSet.size, 1) : 0
     const monthlyAverage = monthsCount > 0 ? totalSpending / monthsCount : 0
 
-    // Sum monthly budget for all main categories
-    const monthlyBudget = categories
-      .filter((c) => c.type === 'main')
-      .reduce((acc, c) => acc + (Number(c.estimated) || 0), 0)
+    // Sum monthly budget for all categories.
+    // Fonte da verdade são as subcategorias (evitando dupla contagem).
+    // Se uma categoria principal não tiver subcategorias, usa seu próprio orçamento.
+    const mainCats = categories.filter((c) => c.type === 'main')
+    const monthlyBudget = mainCats.reduce((acc, main) => {
+      const subs = categories.filter((c) => c.parent === main.id)
+      if (subs.length > 0) {
+        return acc + subs.reduce((subSum, s) => subSum + (Number(s.estimated) || 0), 0)
+      }
+      return acc + (Number(main.estimated) || 0)
+    }, 0)
 
     // If transactions exist, multiply by months count, otherwise by 1 month reference
     const totalBudget = hasTransactions ? monthlyBudget * monthsCount : monthlyBudget
@@ -171,9 +178,14 @@ export default function Index() {
 
   // Data for Monthly Bar Chart (Real vs Orcado)
   const barChartData = useMemo(() => {
-    const monthlyBudget = categories
-      .filter((c) => c.type === 'main')
-      .reduce((acc, c) => acc + (Number(c.estimated) || 0), 0)
+    const mainCats = categories.filter((c) => c.type === 'main')
+    const monthlyBudget = mainCats.reduce((acc, main) => {
+      const subs = categories.filter((c) => c.parent === main.id)
+      if (subs.length > 0) {
+        return acc + subs.reduce((subSum, s) => subSum + (Number(s.estimated) || 0), 0)
+      }
+      return acc + (Number(main.estimated) || 0)
+    }, 0)
 
     const monthMap: Record<string, number> = {}
     transactions.forEach((tx) => {

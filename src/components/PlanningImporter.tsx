@@ -61,6 +61,7 @@ export default function PlanningImporter({
 
   // Configuration in preview
   const [importYear, setImportYear] = useState<number>(2026)
+  const [importCurrency, setImportCurrency] = useState<'EUR' | 'BRL'>('EUR') // padrão EUR conforme especificação
   const [replaceExisting, setReplaceExisting] = useState<boolean>(true) // default: substituir
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
@@ -191,6 +192,7 @@ export default function PlanningImporter({
         replaceExisting,
         monthsToImport,
         rates: exchangeRates,
+        currencyMode: importCurrency,
       })
 
       setImportSummary({
@@ -305,8 +307,8 @@ export default function PlanningImporter({
 
           {parsedData && (
             <div className="space-y-4 overflow-y-auto flex-1 pr-1">
-              {/* Year & Replacement Configuration */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              {/* Year & Replacement & Currency Configuration */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
                 <div>
                   <Label htmlFor="plan-year" className="text-xs font-semibold text-slate-700">
                     Ano de Referência dos Meses (Padrão: 2026)
@@ -327,7 +329,42 @@ export default function PlanningImporter({
 
                 <div>
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
-                    Idempotência (Lançamentos Anteriores)
+                    Moeda dos Valores Realizados
+                  </Label>
+                  <p className="text-[11px] text-slate-500 mb-1.5">
+                    {importCurrency === 'EUR'
+                      ? 'Valores em € convertidos pela taxa de cada mês.'
+                      : 'Valores em R$ gravados diretamente, sem conversão.'}
+                  </p>
+                  <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setImportCurrency('EUR')}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                        importCurrency === 'EUR'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      € Euro (EUR)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportCurrency('BRL')}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                        importCurrency === 'BRL'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      R$ Real (BRL)
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                    Idempotência (Lançamentos)
                   </Label>
                   <RadioGroup
                     value={replaceExisting ? 'replace' : 'keep'}
@@ -340,8 +377,7 @@ export default function PlanningImporter({
                         htmlFor="r-replace"
                         className="text-xs font-normal text-slate-800 cursor-pointer"
                       >
-                        <strong>Substituir</strong> lançamentos importados anteriores desses meses
-                        (Recomendado)
+                        <strong>Substituir</strong> anteriores
                       </Label>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -350,7 +386,7 @@ export default function PlanningImporter({
                         htmlFor="r-keep"
                         className="text-xs font-normal text-slate-800 cursor-pointer"
                       >
-                        <strong>Manter</strong> lançamentos existentes e apenas adicionar estes
+                        <strong>Manter</strong> existentes
                       </Label>
                     </div>
                   </RadioGroup>

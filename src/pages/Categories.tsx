@@ -592,10 +592,15 @@ export default function CategoriesView() {
                     <div className="flex items-center gap-3">
                       <div className="text-right hidden sm:block">
                         <span className="text-[10px] uppercase font-semibold text-slate-400 block">
-                          Orçamento Mensal
+                          Orçamento Mensal {subs.length > 0 && '(Soma Subitens)'}
                         </span>
                         <span className="text-xs font-bold text-slate-800 tabular-nums">
-                          {formatCurrency(main.estimated || 0, currency)}
+                          {formatCurrency(
+                            subs.length > 0
+                              ? subs.reduce((sum, s) => sum + (Number(s.estimated) || 0), 0)
+                              : main.estimated || 0,
+                            currency,
+                          )}
                         </span>
                       </div>
 
@@ -788,15 +793,25 @@ export default function CategoriesView() {
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="cat-est">Orçamento Estimado Mensal (R$ BRL)</Label>
-              <Input
-                id="cat-est"
-                placeholder="Ex: 500,00"
-                value={estimated}
-                onChange={(e) => setEstimated(e.target.value)}
-              />
-            </div>
+            {modalType === 'main' ? (
+              <div className="rounded-md bg-slate-50 p-2.5 border border-slate-200 text-xs text-slate-600">
+                <span className="font-semibold text-slate-800 block mb-0.5">
+                  Orçamento derivado:
+                </span>
+                O orçamento da categoria principal é a soma automática dos orçamentos de suas
+                subcategorias. Cadastre as subcategorias para definir as metas.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="cat-est">Orçamento Estimado Mensal (R$ BRL)</Label>
+                <Input
+                  id="cat-est"
+                  placeholder="Ex: 500,00"
+                  value={estimated}
+                  onChange={(e) => setEstimated(e.target.value)}
+                />
+              </div>
+            )}
 
             {modalType === 'main' && (
               <div className="space-y-1.5">
@@ -850,14 +865,46 @@ export default function CategoriesView() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="e-cat-est">Orçamento Estimado Mensal (R$ BRL)</Label>
-              <Input
-                id="e-cat-est"
-                value={editEstimated}
-                onChange={(e) => setEditEstimated(e.target.value)}
-              />
-            </div>
+            {editingCategory?.type === 'main' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="e-cat-est">Orçamento Mensal (R$ BRL)</Label>
+                {categories.filter((c) => c.parent === editingCategory.id).length > 0 ? (
+                  <div className="rounded-md bg-slate-50 p-2.5 border border-slate-200 text-xs text-slate-700">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-slate-500">Soma das subcategorias:</span>
+                      <strong className="font-bold text-slate-900 text-sm tabular-nums">
+                        {formatCurrency(
+                          categories
+                            .filter((c) => c.parent === editingCategory.id)
+                            .reduce((sum, s) => sum + (Number(s.estimated) || 0), 0),
+                          'BRL',
+                        )}
+                      </strong>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      O orçamento da categoria principal é derivado automaticamente da soma das suas
+                      subcategorias (não editável diretamente).
+                    </p>
+                  </div>
+                ) : (
+                  <Input
+                    id="e-cat-est"
+                    value={editEstimated}
+                    onChange={(e) => setEditEstimated(e.target.value)}
+                    placeholder="Ex: 500,00"
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="e-cat-est">Orçamento Estimado Mensal (R$ BRL)</Label>
+                <Input
+                  id="e-cat-est"
+                  value={editEstimated}
+                  onChange={(e) => setEditEstimated(e.target.value)}
+                />
+              </div>
+            )}
 
             {editingCategory?.type === 'main' && (
               <div className="space-y-1.5">

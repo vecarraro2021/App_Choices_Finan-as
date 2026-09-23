@@ -111,6 +111,7 @@ export default function TransactionsView() {
   const [dateCol, setDateCol] = useState('')
   const [descCol, setDescCol] = useState('')
   const [amountCol, setAmountCol] = useState('')
+  const [amountCurrency, setAmountCurrency] = useState<'EUR' | 'BRL'>('EUR') // Seletor de moeda da coluna de valores (padrão EUR)
   const [categoryCol, setCategoryCol] = useState('')
   const [importFileType, setImportFileType] = useState<'csv' | 'pdf'>('csv')
   const [isProcessingFile, setIsProcessingFile] = useState(false)
@@ -233,21 +234,22 @@ export default function TransactionsView() {
       }
 
       setImportFileType('pdf')
+      const initialPdfCurrency = parseResult.detectedCurrency || 'EUR'
+      setAmountCurrency(initialPdfCurrency)
       setPdfMeta({
         fileName: file.name,
-        currency: parseResult.detectedCurrency || 'BRL',
+        currency: initialPdfCurrency,
         year: parseResult.detectedYear,
         totalPages: extracted.totalPages,
       })
 
       // Converter transações detectadas para o modelo PreviewTransaction
-      // Aplicando conversão cambial se moeda for EUR e categorização automática por palavras-chave
       const preview: PreviewTransaction[] = parseResult.transactions.map((tx, idx) => {
         const matchResult = evaluateCategoryMatch(tx.description, categories)
         const rateUsed = getRateForMonth(tx.month, exchangeRates)
 
         let amountBrl = tx.amount
-        if (tx.currency === 'EUR') {
+        if (initialPdfCurrency === 'EUR') {
           amountBrl = Math.round(tx.amount * rateUsed * 100) / 100
         }
 
@@ -259,7 +261,7 @@ export default function TransactionsView() {
           description: tx.description,
           amount: amountBrl,
           originalAmount: tx.amount,
-          originalCurrency: tx.currency,
+          originalCurrency: initialPdfCurrency,
           category: initialCategory,
           month: tx.month,
           selected: true,
@@ -362,9 +364,10 @@ export default function TransactionsView() {
       setDateCol(detectedDate)
       setDescCol(detectedDesc)
       setAmountCol(detectedAmount)
+      setAmountCurrency('EUR') // padrão EUR conforme especificação
       setCategoryCol(detectedCat)
 
-      buildPreview(parsed.rows, detectedDate, detectedDesc, detectedAmount, detectedCat)
+      buildPreview(parsed.rows, detectedDate, detectedDesc, detectedAmount, detectedCat, 'EUR')
       setShowPreviewDialog(true)
 
       if (parsed.sourceType === 'xlsx') {
@@ -393,13 +396,22 @@ export default function TransactionsView() {
     descC: string,
     amtCol: string,
     cCol: string,
+    colCurrency: 'EUR' | 'BRL' = amountCurrency,
   ) => {
     const preview: PreviewTransaction[] = rows.map((r, i) => {
       const rawDate = r[dCol]
       const normDate = normalizeDate(rawDate)
       const desc = r[descC] || 'Sem descrição'
-      const amt = parseAmount(r[amtCol])
+      const rawAmt = parseAmount(r[amtCol])
       const month = normDate.slice(0, 7)
+      const rateUsed = getRateForMonth(month, exchangeRates)
+
+      // Se a coluna for EUR, converte para BRL pela taxa do mês
+      // Se for BRL, mantém o valor original sem conversão
+      let finalAmountBrl = rawAmt
+      if (colCurrency === 'EUR') {
+        finalAmountBrl = Math.round(rawAmt * rateUsed * 100) / 100
+      }
 
       // Attempt matching category from file column or auto-categorizer
       let assignedCat: string | undefined
@@ -421,7 +433,9 @@ export default function TransactionsView() {
         id: `preview-${i}`,
         date: normDate,
         description: desc,
-        amount: amt,
+        amount: finalAmountBrl,
+        originalAmount: rawAmt,
+        originalCurrency: colCurrency,
         category: assignedCat,
         month,
         selected: true,
@@ -431,9 +445,37 @@ export default function TransactionsView() {
     setPreviewList(preview)
   }
 
-  // Re-build preview when user manually adjusts column mapping
-  const handleApplyMapping = () => {
-    buildPreview(rawRows, dateCol, descCol, amountCol, categoryCol)
+  // Re-build preview when user changes currency in PDF mode
+  const handlePdfCurrencyChange = (newCurr: 'EUR' | 'BRL') => {
+    setAmountCurrency(newCurr)
+    if (pdfMeta) {
+      setPdfMeta({ ...pdfMeta, currency: newCurr })
+    }
+    setPreviewList((prev) =>
+      prev.map((item) => {
+        const rawAmt = item.originalAmount !== undefined ? item.originalAmount : item.amount
+        const rateUsed = getRateForMonth(item.month, exchangeRates)
+        let convertedBrl = rawAmt
+        if (newCurr === 'EUR') {
+          convertedBrl = Math.round(rawAmt * rateUsed * 100) / 100
+        }
+        return {
+          ...item,
+          amount: convertedBrl,
+          originalAmount: rawAmt,
+          originalCurrency: newCurr,
+        }
+      }),
+    )
+  }
+
+  // Re-build preview when user manually adjusts column mapping or currency
+  const handleApplyMapping = (forcedCurrency?: 'EUR' | 'BRL' | React.MouseEvent) => {
+    const effCurr =
+      typeof forcedCurrency === 'string' && (forcedCurrency === 'EUR' || forcedCurrency === 'BRL')
+        ? forcedCurrency
+        : amountCurrency
+    buildPreview(rawRows, dateCol, descCol, amountCol, categoryCol, effCurr)
   }
 
   // Safety check on preview items: warns if suspiciously binary, unreadable or 100% 0 with identical date
@@ -500,6 +542,7 @@ export default function TransactionsView() {
         date: item.date,
         description: item.description,
         amount: item.amount,
+        amount_currency: item.originalCurrency || 'BRL',
         category: item.category || undefined,
         source: 'importado' as const,
         month: item.month,
@@ -984,25 +1027,53 @@ export default function TransactionsView() {
             </DialogDescription>
           </DialogHeader>
 
-          {/* Banner específico para importação de PDF */}
+          {/* Banner específico para importação de PDF com seletor de moeda */}
           {importFileType === 'pdf' && pdfMeta && (
-            <div className="p-3 bg-blue-50/80 rounded-lg border border-blue-200 text-xs text-blue-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+            <div className="p-3 bg-blue-50/80 rounded-lg border border-blue-200 text-xs text-blue-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <FileText className="h-4 w-4 text-blue-600 shrink-0" />
                 <span>
                   Arquivo: <strong>{pdfMeta.fileName}</strong> ({pdfMeta.totalPages} página(s))
                   {pdfMeta.year && ` • Ano: ${pdfMeta.year}`}
-                  {pdfMeta.currency === 'EUR' && (
-                    <Badge
-                      variant="outline"
-                      className="ml-2 bg-amber-50 text-amber-800 border-amber-200 text-[10px]"
-                    >
-                      Valores em EUR convertidos para R$ pela taxa média de cada mês
-                    </Badge>
-                  )}
                 </span>
+                <div className="inline-flex items-center gap-1.5 ml-2 bg-white px-2 py-1 rounded-md border border-slate-300">
+                  <span className="text-[11px] font-semibold text-slate-700">
+                    Moeda do extrato:
+                  </span>
+                  <div className="inline-flex rounded border border-slate-200 bg-slate-100 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePdfCurrencyChange('EUR')}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded ${
+                        amountCurrency === 'EUR'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Valores em Euro: serão convertidos para Real pela taxa média do mês"
+                    >
+                      € EUR
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePdfCurrencyChange('BRL')}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded ${
+                        amountCurrency === 'BRL'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Valores em Reais: salvos sem conversão cambial"
+                    >
+                      R$ BRL
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className="flex items-center gap-3 text-[11px]">
+                <span className="text-[10px] text-slate-500">
+                  {amountCurrency === 'EUR'
+                    ? 'Convertido pela taxa do mês'
+                    : 'Gravado em R$ sem conversão'}
+                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -1078,7 +1149,43 @@ export default function TransactionsView() {
               </div>
 
               <div>
-                <Label className="text-[11px] font-semibold text-slate-600">Coluna de Valor</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-semibold text-slate-600">
+                    Coluna de Valor
+                  </Label>
+                  <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAmountCurrency('EUR')
+                        handleApplyMapping('EUR')
+                      }}
+                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition-colors ${
+                        amountCurrency === 'EUR'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Moeda de origem: Euro (€). Converterá para R$ pela taxa do mês."
+                    >
+                      €
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAmountCurrency('BRL')
+                        handleApplyMapping('BRL')
+                      }}
+                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition-colors ${
+                        amountCurrency === 'BRL'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Moeda de origem: Real (R$). Grava sem conversão cambial."
+                    >
+                      R$
+                    </button>
+                  </div>
+                </div>
                 <Select
                   value={amountCol}
                   onValueChange={(v) => {
@@ -1096,6 +1203,12 @@ export default function TransactionsView() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Moeda:{' '}
+                  <strong>
+                    {amountCurrency === 'EUR' ? '€ Euro (converte)' : 'R$ Real (direto)'}
+                  </strong>
+                </p>
               </div>
 
               <div>
@@ -1146,7 +1259,7 @@ export default function TransactionsView() {
                   <th className="py-2.5 px-3">Data</th>
                   <th className="py-2.5 px-3">Descrição</th>
                   <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
-                  <th className="py-2.5 px-3 text-right">Valor (BRL)</th>
+                  <th className="py-2.5 px-3 text-right">Valor Final (R$ BRL)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1208,9 +1321,17 @@ export default function TransactionsView() {
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
                         <div>
                           <span>{formatCurrency(row.amount, 'BRL')}</span>
-                          {row.originalCurrency === 'EUR' && row.originalAmount && (
+                          {row.originalCurrency === 'EUR' && row.originalAmount !== undefined ? (
                             <span className="block text-[10px] text-slate-400 font-normal">
                               (orig: € {row.originalAmount.toFixed(2)})
+                            </span>
+                          ) : (
+                            <span className="block text-[10px] text-emerald-600 font-normal">
+                              (orig: R${' '}
+                              {row.originalAmount !== undefined
+                                ? row.originalAmount.toFixed(2)
+                                : row.amount.toFixed(2)}
+                              )
                             </span>
                           )}
                         </div>

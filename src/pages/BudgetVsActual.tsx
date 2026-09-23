@@ -150,6 +150,13 @@ export default function BudgetVsActualView() {
     const rows = mainCats.map((main) => {
       const subCats = categories.filter((c) => c.parent === main.id)
 
+      // Orçamento mensal da categoria principal = soma das subcategorias
+      // Se não tiver subcategorias, usa o próprio estimated
+      const computedMainEstimated =
+        subCats.length > 0
+          ? subCats.reduce((sum, sc) => sum + (Number(sc.estimated) || 0), 0)
+          : Number(main.estimated) || 0
+
       // Month-by-month spending for this main category (sum of subcats + direct)
       const monthlyValues: Record<string, { actual: number; estimated: number }> = {}
       let totalActual = 0
@@ -162,7 +169,7 @@ export default function BudgetVsActualView() {
 
         monthlyValues[m] = {
           actual,
-          estimated: Number(main.estimated) || 0,
+          estimated: computedMainEstimated,
         }
         totalActual += actual
       })
@@ -194,7 +201,8 @@ export default function BudgetVsActualView() {
         id: main.id,
         name: main.name,
         color: main.color,
-        estimatedMonthly: Number(main.estimated) || 0,
+        estimatedMonthly: computedMainEstimated,
+        hasSubcategories: subCats.length > 0,
         monthly: monthlyValues,
         totalActual,
         subcategories: subRows,
@@ -806,15 +814,28 @@ export default function BudgetVsActualView() {
                         </td>
 
                         <td className="py-3 px-3 text-right tabular-nums text-slate-500 whitespace-nowrap">
-                          <InlineEstimateCell
-                            value={row.estimatedMonthly}
-                            currency={currency}
-                            rate={getRateForMonth(undefined, exchangeRates)}
-                            categoryId={row.id}
-                            categoryName={row.name}
-                            onSave={(val) => handleInlineSaveEstimate(row.id, val)}
-                            className="font-medium"
-                          />
+                          {row.hasSubcategories ? (
+                            <span
+                              className="font-bold text-slate-800 cursor-default"
+                              title="Soma derivada dos orçamentos das subcategorias"
+                            >
+                              {formatCurrency(
+                                row.estimatedMonthly,
+                                currency,
+                                getRateForMonth(undefined, exchangeRates),
+                              )}
+                            </span>
+                          ) : (
+                            <InlineEstimateCell
+                              value={row.estimatedMonthly}
+                              currency={currency}
+                              rate={getRateForMonth(undefined, exchangeRates)}
+                              categoryId={row.id}
+                              categoryName={row.name}
+                              onSave={(val) => handleInlineSaveEstimate(row.id, val)}
+                              className="font-medium"
+                            />
+                          )}
                         </td>
 
                         {/* Month columns */}

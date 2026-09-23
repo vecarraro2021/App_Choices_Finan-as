@@ -36,6 +36,7 @@ export interface Transaction {
   date: string // YYYY-MM-DD
   description: string
   amount: number // Stored in BRL
+  amount_currency?: 'BRL' | 'EUR'
   category?: string
   source: 'importado' | 'manual'
   month: string // YYYY-MM

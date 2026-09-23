@@ -257,6 +257,7 @@ export async function createTransaction(data: {
   date: string
   description: string
   amount: number
+  amount_currency?: 'BRL' | 'EUR'
   category?: string
   source: 'importado' | 'manual'
   month: string
@@ -266,6 +267,7 @@ export async function createTransaction(data: {
 
   return await pb.collection('transactions').create<Transaction>({
     ...data,
+    amount_currency: data.amount_currency || 'BRL',
     user: userId,
     owner: userId,
   })
@@ -276,6 +278,7 @@ export async function createTransactionsBatch(
     date: string
     description: string
     amount: number
+    amount_currency?: 'BRL' | 'EUR'
     category?: string
     source: 'importado' | 'manual'
     month: string
@@ -289,6 +292,7 @@ export async function createTransactionsBatch(
     try {
       await pb.collection('transactions').create({
         ...item,
+        amount_currency: item.amount_currency || 'BRL',
         user: userId,
         owner: userId,
       })
@@ -611,6 +615,7 @@ export async function importPlanningData(params: {
   replaceExisting: boolean
   monthsToImport: number[] // e.g. [1, 2, 3, 4, 5, 6, 7, 8]
   rates?: ExchangeRate[] | Map<string, number> | Record<string, number>
+  currencyMode?: 'BRL' | 'EUR'
 }): Promise<{
   mainCategoriesCreated: number
   subCategoriesCreated: number
@@ -841,10 +846,13 @@ export async function importPlanningData(params: {
     date: string
     description: string
     amount: number
+    amount_currency: 'BRL' | 'EUR'
     category?: string
     source: 'importado'
     month: string
   }> = []
+
+  const isEurMode = params.currencyMode === 'EUR'
 
   for (const section of params.sections) {
     const cleanSection = sanitize(section.name)
@@ -866,10 +874,19 @@ export async function importPlanningData(params: {
           const monthStr = `${params.year}-${String(mIdx).padStart(2, '0')}`
           const dateStr = `${monthStr}-01`
 
+          // Se a moeda declarada for EUR, converte para BRL pela taxa do mês
+          // Se for BRL, salva o valor diretamente em reais sem conversão
+          let finalAmountBrl = val
+          if (isEurMode) {
+            const mRate = getRateForMonth(monthStr, params.rates)
+            finalAmountBrl = Math.round(val * mRate * 100) / 100
+          }
+
           toInsert.push({
             date: dateStr,
             description: `${cleanItem} (importado da planilha)`,
-            amount: val, // Saved in EUR (app currency)
+            amount: finalAmountBrl,
+            amount_currency: isEurMode ? 'EUR' : 'BRL',
             category: subCat?.id,
             source: 'importado',
             month: monthStr,
