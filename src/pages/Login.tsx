@@ -15,8 +15,8 @@ import {
 } from '@/components/ui/card'
 
 export default function Login() {
-  const [email, setEmail] = useState('demo@financeiro.app')
-  const [password, setPassword] = useState('Skip@Pass')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -102,23 +102,6 @@ export default function Login() {
                     required
                   />
                 </div>
-              </div>
-
-              {/* Demo credentials hint */}
-              <div className="rounded-lg bg-blue-50/70 p-3 text-xs text-blue-800 border border-blue-100 leading-relaxed">
-                <strong className="font-semibold block mb-0.5">
-                  Conta Demonstração Pré-configurada:
-                </strong>
-                <p>
-                  E-mail:{' '}
-                  <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-900">
-                    demo@financeiro.app
-                  </code>
-                </p>
-                <p>
-                  Senha:{' '}
-                  <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-900">Skip@Pass</code>
-                </p>
               </div>
             </CardContent>
 
