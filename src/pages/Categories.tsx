@@ -148,16 +148,27 @@ export default function CategoriesView() {
 
     try {
       setSaving(true)
-      const estNum = parseAmount(estimated)
+      const est = modalType === 'sub' ? parseAmount(estimated) : 0
 
       await createCategory({
         name: name.trim(),
         type: modalType,
-        parent: modalType === 'sub' && parentId !== 'none' ? parentId : undefined,
-        estimated: estNum || 0,
+        parent: modalType === 'sub' ? parentId : undefined,
+        estimated: est,
         color: modalType === 'main' ? color : undefined,
       })
 
+      // Se criou subcategoria com orçamento, sincronizar categoria pai
+      if (modalType === 'sub' && parentId && est > 0) {
+        const siblingSum =
+          categories
+            .filter((c) => {
+              const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+              return p === parentId
+            })
+            .reduce((sum, c) => sum + (Number(c.estimated) || 0), 0) + est
+        await updateCategory(parentId, { estimated: Math.round(siblingSum * 100) / 100 })
+      }
       toast({ title: 'Categoria cadastrada com sucesso!' })
       setShowAddModal(false)
       loadData()
@@ -192,6 +203,26 @@ export default function CategoriesView() {
         color: editingCategory.type === 'main' ? editColor : undefined,
       })
 
+      // Se editou subcategoria, sincroniza pai no backend
+      if (editingCategory.type === 'sub' && editingCategory.parent) {
+        const parentId =
+          typeof editingCategory.parent === 'string'
+            ? editingCategory.parent
+            : (editingCategory.parent as any).id
+        if (parentId) {
+          const siblingSum = categories
+            .filter((c) => {
+              const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+              return p === parentId
+            })
+            .reduce((sum, c) => {
+              const val = c.id === editingCategory.id ? estNum : Number(c.estimated) || 0
+              return sum + val
+            }, 0)
+          await updateCategory(parentId, { estimated: Math.round(siblingSum * 100) / 100 })
+        }
+      }
+
       toast({ title: 'Categoria atualizada com sucesso!' })
       setEditingCategory(null)
       loadData()
@@ -209,6 +240,9 @@ export default function CategoriesView() {
     if (!subToMove || subToMove.parent === newParentId) {
       return
     }
+
+    const oldParentId =
+      typeof subToMove.parent === 'string' ? subToMove.parent : (subToMove.parent as any)?.id
 
     const targetParent = categories.find((c) => c.id === newParentId && c.type === 'main')
     if (!targetParent) {
@@ -233,10 +267,31 @@ export default function CategoriesView() {
         color: targetParent.color || undefined,
       })
 
+      // Recalcular soma dos pais antigo e novo no backend
+      const subEst = Number(subToMove.estimated) || 0
+      if (oldParentId) {
+        const oldSiblingSum = categories
+          .filter((c) => {
+            const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+            return p === oldParentId && c.id !== subCatId
+          })
+          .reduce((sum, c) => sum + (Number(c.estimated) || 0), 0)
+        await updateCategory(oldParentId, { estimated: Math.round(oldSiblingSum * 100) / 100 })
+      }
+      const newSiblingSum =
+        categories
+          .filter((c) => {
+            const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+            return p === newParentId && c.id !== subCatId
+          })
+          .reduce((sum, c) => sum + (Number(c.estimated) || 0), 0) + subEst
+      await updateCategory(newParentId, { estimated: Math.round(newSiblingSum * 100) / 100 })
+
       toast({
         title: `Subcategoria movida!`,
         description: `"${subToMove.name}" agora pertence a "${targetParent.name}".`,
       })
+      loadData()
     } catch (err) {
       console.error('Erro ao mover subcategoria:', err)
       // Rollback optimistic update
@@ -439,7 +494,25 @@ export default function CategoriesView() {
 
     try {
       setDeleting(true)
+      const oldParentId =
+        deletingCat.type === 'sub'
+          ? typeof deletingCat.parent === 'string'
+            ? deletingCat.parent
+            : (deletingCat.parent as any)?.id
+          : null
+
       await deleteCategory(deletingCat.id, reassignTo !== 'none' ? reassignTo : undefined)
+
+      // Se era subcategoria, recalcular pai
+      if (oldParentId) {
+        const remainingSum = categories
+          .filter((c) => {
+            const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+            return p === oldParentId && c.id !== deletingCat.id
+          })
+          .reduce((sum, c) => sum + (Number(c.estimated) || 0), 0)
+        await updateCategory(oldParentId, { estimated: Math.round(remainingSum * 100) / 100 })
+      }
 
       toast({ title: 'Categoria removida com sucesso.' })
       setDeletingCat(null)

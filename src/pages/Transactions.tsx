@@ -1259,12 +1259,14 @@ export default function TransactionsView() {
                   <th className="py-2.5 px-3">Data</th>
                   <th className="py-2.5 px-3">Descrição</th>
                   <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
+                  <th className="py-2.5 px-2 text-center w-24">Moeda</th>
                   <th className="py-2.5 px-3 text-right">Valor Final (R$ BRL)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {previewList.map((row, idx) => {
                   const isChecked = row.selected !== false
+                  const rowCurr = row.originalCurrency || amountCurrency
 
                   return (
                     <tr
@@ -1318,10 +1320,64 @@ export default function TransactionsView() {
                         </div>
                       </td>
 
+                      {/* Seletor individual de moeda da linha */}
+                      <td className="py-2.5 px-2 text-center">
+                        <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...previewList]
+                              const raw =
+                                row.originalAmount !== undefined ? row.originalAmount : row.amount
+                              const rateUsed = getRateForMonth(row.month, exchangeRates)
+                              const finalBrl = Math.round(raw * rateUsed * 100) / 100
+                              updated[idx] = {
+                                ...row,
+                                amount: finalBrl,
+                                originalAmount: raw,
+                                originalCurrency: 'EUR',
+                              }
+                              setPreviewList(updated)
+                            }}
+                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                              rowCurr === 'EUR'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                            title="Declarar este item em Euro (€)"
+                          >
+                            €
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...previewList]
+                              const raw =
+                                row.originalAmount !== undefined ? row.originalAmount : row.amount
+                              updated[idx] = {
+                                ...row,
+                                amount: raw,
+                                originalAmount: raw,
+                                originalCurrency: 'BRL',
+                              }
+                              setPreviewList(updated)
+                            }}
+                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                              rowCurr === 'BRL'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                            title="Declarar este item em Reais (R$)"
+                          >
+                            R$
+                          </button>
+                        </div>
+                      </td>
+
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
                         <div>
                           <span>{formatCurrency(row.amount, 'BRL')}</span>
-                          {row.originalCurrency === 'EUR' && row.originalAmount !== undefined ? (
+                          {rowCurr === 'EUR' && row.originalAmount !== undefined ? (
                             <span className="block text-[10px] text-slate-400 font-normal">
                               (orig: € {row.originalAmount.toFixed(2)})
                             </span>

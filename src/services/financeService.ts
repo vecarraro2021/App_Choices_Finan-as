@@ -166,7 +166,31 @@ export async function getCategories(): Promise<Category[]> {
     sort: 'name',
     expand: 'parent',
   })
-  return records
+
+  // CORREÇÃO 2: Garantir que o orçamento (estimated) de cada categoria principal
+  // seja sempre a soma exata dos orçamentos de suas subcategorias filhas.
+  // Mapear soma das filhas por parent id
+  const subSumByParent = new Map<string, number>()
+  for (const cat of records) {
+    if (cat.type === 'sub' && cat.parent) {
+      const pId = typeof cat.parent === 'string' ? cat.parent : (cat.parent as any).id
+      if (pId) {
+        const currentSum = subSumByParent.get(pId) || 0
+        subSumByParent.set(pId, currentSum + (Number(cat.estimated) || 0))
+      }
+    }
+  }
+
+  return records.map((cat) => {
+    if (cat.type === 'main') {
+      const calculatedSum = Number((subSumByParent.get(cat.id) || 0).toFixed(2))
+      return {
+        ...cat,
+        estimated: calculatedSum,
+      }
+    }
+    return cat
+  })
 }
 
 export async function createCategory(data: Partial<Category>): Promise<Category> {
@@ -610,12 +634,15 @@ export async function importPlanningData(params: {
       subgroup?: string
       estimated: number
       monthlyValues: Record<string, number>
+      rowCurrency?: 'BRL' | 'EUR'
     }>
   }>
   replaceExisting: boolean
   monthsToImport: number[] // e.g. [1, 2, 3, 4, 5, 6, 7, 8]
   rates?: ExchangeRate[] | Map<string, number> | Record<string, number>
   currencyMode?: 'BRL' | 'EUR'
+  estimatedCurrency?: 'BRL' | 'EUR'
+  columnCurrencies?: Record<string, 'BRL' | 'EUR'> // key: 'estimated' | '1' | '2' ... | '12'
 }): Promise<{
   mainCategoriesCreated: number
   subCategoriesCreated: number
@@ -791,8 +818,21 @@ export async function importPlanningData(params: {
         }
 
         // Update estimated if provided (> 0)
-        if (item.estimated > 0 && subCat.estimated !== item.estimated) {
-          updateData.estimated = item.estimated
+        // Se a moeda do estimado for EUR, converte para BRL usando a taxa do ano/período (ou taxa base)
+        const estCurr =
+          params.columnCurrencies?.estimated ||
+          params.estimatedCurrency ||
+          params.currencyMode ||
+          'EUR'
+        let finalEstimatedBrl = item.estimated
+        if (item.estimated > 0 && estCurr === 'EUR') {
+          // Converter usando a taxa de referência
+          const refRate = getRateForMonth(`${params.year}-01`, params.rates)
+          finalEstimatedBrl = Math.round(item.estimated * refRate * 100) / 100
+        }
+
+        if (item.estimated > 0 && subCat.estimated !== finalEstimatedBrl) {
+          updateData.estimated = finalEstimatedBrl
           needsUpdate = true
         }
 
@@ -852,8 +892,6 @@ export async function importPlanningData(params: {
     month: string
   }> = []
 
-  const isEurMode = params.currencyMode === 'EUR'
-
   for (const section of params.sections) {
     const cleanSection = sanitize(section.name)
     const secNorm = norm(cleanSection)
@@ -874,10 +912,15 @@ export async function importPlanningData(params: {
           const monthStr = `${params.year}-${String(mIdx).padStart(2, '0')}`
           const dateStr = `${monthStr}-01`
 
+          // Moeda da coluna mensal específica ou padrão
+          const colCurr =
+            params.columnCurrencies?.[mIdxStr] || item.rowCurrency || params.currencyMode || 'EUR'
+          const isEur = colCurr === 'EUR'
+
           // Se a moeda declarada for EUR, converte para BRL pela taxa do mês
           // Se for BRL, salva o valor diretamente em reais sem conversão
           let finalAmountBrl = val
-          if (isEurMode) {
+          if (isEur) {
             const mRate = getRateForMonth(monthStr, params.rates)
             finalAmountBrl = Math.round(val * mRate * 100) / 100
           }
@@ -886,7 +929,7 @@ export async function importPlanningData(params: {
             date: dateStr,
             description: `${cleanItem} (importado da planilha)`,
             amount: finalAmountBrl,
-            amount_currency: isEurMode ? 'EUR' : 'BRL',
+            amount_currency: isEur ? 'EUR' : 'BRL',
             category: subCat?.id,
             source: 'importado',
             month: monthStr,

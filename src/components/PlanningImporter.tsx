@@ -62,6 +62,8 @@ export default function PlanningImporter({
   // Configuration in preview
   const [importYear, setImportYear] = useState<number>(2026)
   const [importCurrency, setImportCurrency] = useState<'EUR' | 'BRL'>('EUR') // padrão EUR conforme especificação
+  // Seletor de moeda por coluna: 'estimated' para Estimado, '1'..'12' para os meses
+  const [columnCurrencies, setColumnCurrencies] = useState<Record<string, 'EUR' | 'BRL'>>({})
   const [replaceExisting, setReplaceExisting] = useState<boolean>(true) // default: substituir
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
@@ -150,11 +152,19 @@ export default function PlanningImporter({
       }
 
       setParsedData(parsed)
-      // Expand first 2 sections by default
+      // Expand first 3 sections by default
       const initialExp: Record<string, boolean> = {}
       parsed.sections.slice(0, 3).forEach((s) => {
         initialExp[s.name] = true
       })
+      // Inicializar moedas das colunas com padrão EUR
+      const initialColCurrs: Record<string, 'EUR' | 'BRL'> = {
+        estimated: 'EUR',
+      }
+      parsed.detectedMonths.forEach((m) => {
+        initialColCurrs[String(m.index)] = 'EUR'
+      })
+      setColumnCurrencies(initialColCurrs)
       setExpandedSections(initialExp)
       setShowPreviewModal(true)
     } catch (err: any) {
@@ -193,6 +203,8 @@ export default function PlanningImporter({
         monthsToImport,
         rates: exchangeRates,
         currencyMode: importCurrency,
+        columnCurrencies,
+        estimatedCurrency: columnCurrencies['estimated'] || importCurrency,
       })
 
       setImportSummary({
@@ -329,35 +341,48 @@ export default function PlanningImporter({
 
                 <div>
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
-                    Moeda dos Valores Realizados
+                    Moeda Padrão Geral (Atalho)
                   </Label>
                   <p className="text-[11px] text-slate-500 mb-1.5">
-                    {importCurrency === 'EUR'
-                      ? 'Valores em € convertidos pela taxa de cada mês.'
-                      : 'Valores em R$ gravados diretamente, sem conversão.'}
+                    Define todas as colunas de uma só vez (ou ajuste individualmente no cabeçalho da
+                    tabela).
                   </p>
                   <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5">
                     <button
                       type="button"
-                      onClick={() => setImportCurrency('EUR')}
+                      onClick={() => {
+                        setImportCurrency('EUR')
+                        const updated: Record<string, 'EUR' | 'BRL'> = { estimated: 'EUR' }
+                        parsedData?.detectedMonths.forEach((m) => {
+                          updated[String(m.index)] = 'EUR'
+                        })
+                        setColumnCurrencies(updated)
+                      }}
                       className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                         importCurrency === 'EUR'
                           ? 'bg-blue-600 text-white shadow-xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      € Euro (EUR)
+                      Tudo € EUR
                     </button>
                     <button
                       type="button"
-                      onClick={() => setImportCurrency('BRL')}
+                      onClick={() => {
+                        setImportCurrency('BRL')
+                        const updated: Record<string, 'EUR' | 'BRL'> = { estimated: 'BRL' }
+                        parsedData?.detectedMonths.forEach((m) => {
+                          updated[String(m.index)] = 'BRL'
+                        })
+                        setColumnCurrencies(updated)
+                      }}
                       className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                         importCurrency === 'BRL'
                           ? 'bg-blue-600 text-white shadow-xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      R$ Real (BRL)
+                      Tudo R$ BRL
                     </button>
                   </div>
                 </div>
@@ -491,13 +516,99 @@ export default function PlanningImporter({
                             <thead className="bg-slate-100/70 text-[10px] uppercase font-semibold text-slate-600">
                               <tr>
                                 <th className="py-2 px-3 pl-8">Subcategoria</th>
-                                <th className="py-2 px-3">Grupo (Col C)</th>
-                                <th className="py-2 px-3 text-right">Estimado (Col D)</th>
-                                {parsedData.detectedMonths.map((m) => (
-                                  <th key={m.index} className="py-2 px-2 text-center">
-                                    {m.name}
-                                  </th>
-                                ))}
+                                <th className="py-2 px-3">Grupo</th>
+                                <th className="py-2 px-3 text-right">
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span>Estimado</span>
+                                    <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setColumnCurrencies((prev) => ({
+                                            ...prev,
+                                            estimated: 'EUR',
+                                          }))
+                                        }}
+                                        className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                                          (columnCurrencies['estimated'] || 'EUR') === 'EUR'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                        }`}
+                                        title="Estimado em Euro (€)"
+                                      >
+                                        €
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setColumnCurrencies((prev) => ({
+                                            ...prev,
+                                            estimated: 'BRL',
+                                          }))
+                                        }}
+                                        className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                                          (columnCurrencies['estimated'] || 'EUR') === 'BRL'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                        }`}
+                                        title="Estimado em Reais (R$)"
+                                      >
+                                        R$
+                                      </button>
+                                    </div>
+                                  </div>
+                                </th>
+                                {parsedData.detectedMonths.map((m) => {
+                                  const mKey = String(m.index)
+                                  const colCurr = columnCurrencies[mKey] || 'EUR'
+                                  return (
+                                    <th key={m.index} className="py-2 px-2 text-center">
+                                      <div className="flex flex-col items-center gap-1">
+                                        <span>{m.name}</span>
+                                        <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setColumnCurrencies((prev) => ({
+                                                ...prev,
+                                                [mKey]: 'EUR',
+                                              }))
+                                            }}
+                                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                                              colCurr === 'EUR'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                            title={`Mês ${m.name} em Euro (€) - converte pela taxa`}
+                                          >
+                                            €
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setColumnCurrencies((prev) => ({
+                                                ...prev,
+                                                [mKey]: 'BRL',
+                                              }))
+                                            }}
+                                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                                              colCurr === 'BRL'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                            title={`Mês ${m.name} em Reais (R$) - valor direto`}
+                                          >
+                                            R$
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </th>
+                                  )
+                                })}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-[11px]">
@@ -516,37 +627,67 @@ export default function PlanningImporter({
                                     )}
                                   </td>
                                   <td className="py-2 px-3 text-right font-medium text-slate-700 tabular-nums">
-                                    {item.estimated > 0
-                                      ? formatCurrency(item.estimated, 'EUR')
-                                      : '—'}
+                                    {item.estimated > 0 ? (
+                                      <div>
+                                        <div>
+                                          {formatCurrency(
+                                            item.estimated,
+                                            columnCurrencies['estimated'] || 'EUR',
+                                          )}
+                                        </div>
+                                        {(columnCurrencies['estimated'] || 'EUR') === 'EUR' && (
+                                          <div className="text-[9px] text-slate-500 font-normal">
+                                            ≈ R${' '}
+                                            {(
+                                              item.estimated *
+                                              getRateForMonth(`${importYear}-01`, exchangeRates)
+                                            ).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      '—'
+                                    )}
                                   </td>
                                   {parsedData.detectedMonths.map((m) => {
                                     const val = item.monthlyValues[String(m.index)]
                                     const mStr = `${importYear}-${String(m.index).padStart(2, '0')}`
                                     const mRate = getRateForMonth(mStr, exchangeRates)
+                                    const colCurr = columnCurrencies[String(m.index)] || 'EUR'
+                                    const isColEur = colCurr === 'EUR'
                                     return (
                                       <td
                                         key={m.index}
                                         className={`py-2 px-2 text-center tabular-nums ${
                                           val > 0
-                                            ? 'font-bold text-slate-900 bg-emerald-50/40'
+                                            ? isColEur
+                                              ? 'font-bold text-slate-900 bg-emerald-50/40'
+                                              : 'font-bold text-blue-900 bg-blue-50/40'
                                             : 'text-slate-300'
                                         }`}
                                         title={
                                           val > 0
-                                            ? `€ ${val} × R$ ${mRate.toFixed(2)} = R$ ${(val * mRate).toFixed(2)}`
+                                            ? isColEur
+                                              ? `€ ${val} × R$ ${mRate.toFixed(2)} = R$ ${(val * mRate).toFixed(2)}`
+                                              : `R$ ${val} (gravado direto sem conversão)`
                                             : undefined
                                         }
                                       >
                                         {val > 0 ? (
                                           <div>
-                                            <div>{formatCurrency(val, 'EUR')}</div>
-                                            <div className="text-[9px] text-slate-500 font-normal">
-                                              ≈ R${' '}
-                                              {(val * mRate).toLocaleString('pt-BR', {
-                                                maximumFractionDigits: 0,
-                                              })}
-                                            </div>
+                                            <div>{formatCurrency(val, colCurr)}</div>
+                                            {isColEur ? (
+                                              <div className="text-[9px] text-slate-500 font-normal">
+                                                ≈ R${' '}
+                                                {(val * mRate).toLocaleString('pt-BR', {
+                                                  maximumFractionDigits: 0,
+                                                })}
+                                              </div>
+                                            ) : (
+                                              <div className="text-[9px] text-blue-600 font-normal">
+                                                (direto R$)
+                                              </div>
+                                            )}
                                           </div>
                                         ) : (
                                           '—'

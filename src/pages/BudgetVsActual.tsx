@@ -372,6 +372,27 @@ export default function BudgetVsActualView() {
       setSavingEstimate(true)
       const est = parseAmount(newEstimate)
       await updateCategory(editingCategory.id, { estimated: est })
+
+      // Sincronizar pai no backend caso seja subcategoria
+      if (editingCategory.type === 'sub' && editingCategory.parent) {
+        const parentId =
+          typeof editingCategory.parent === 'string'
+            ? editingCategory.parent
+            : (editingCategory.parent as any).id
+        if (parentId) {
+          const siblingSum = categories
+            .filter((c) => {
+              const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+              return p === parentId
+            })
+            .reduce((sum, c) => {
+              const val = c.id === editingCategory.id ? est : Number(c.estimated) || 0
+              return sum + val
+            }, 0)
+          await updateCategory(parentId, { estimated: Math.round(siblingSum * 100) / 100 })
+        }
+      }
+
       toast({ title: 'Orçamento estimado atualizado!' })
       setEditingCategory(null)
       loadData()
@@ -387,6 +408,27 @@ export default function BudgetVsActualView() {
   const handleInlineSaveEstimate = async (categoryId: string, newAmountBrl: number) => {
     try {
       await updateCategory(categoryId, { estimated: newAmountBrl })
+
+      // Sincronizar pai no backend caso a categoria editada seja uma subcategoria
+      const targetCat = categories.find((c) => c.id === categoryId)
+      if (targetCat && targetCat.type === 'sub' && targetCat.parent) {
+        const parentId =
+          typeof targetCat.parent === 'string' ? targetCat.parent : (targetCat.parent as any).id
+        if (parentId) {
+          // Calcular nova soma de todas as irmãs
+          const siblingSum = categories
+            .filter((c) => {
+              const p = typeof c.parent === 'string' ? c.parent : (c.parent as any)?.id
+              return p === parentId
+            })
+            .reduce((sum, c) => {
+              const val = c.id === categoryId ? newAmountBrl : Number(c.estimated) || 0
+              return sum + val
+            }, 0)
+          await updateCategory(parentId, { estimated: Math.round(siblingSum * 100) / 100 })
+        }
+      }
+
       toast({
         title: 'Orçamento atualizado!',
         description: `Novo teto mensal definido como ${formatCurrency(newAmountBrl, currency)}.`,
