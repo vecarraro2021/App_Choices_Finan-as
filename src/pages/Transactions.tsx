@@ -65,9 +65,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import PlanningImporter from '@/components/PlanningImporter'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 
 interface PreviewTransaction {
   id: string
@@ -84,7 +82,6 @@ interface PreviewTransaction {
 export default function TransactionsView() {
   const { user, currency } = useAuth()
   const { toast } = useToast()
-  const navigate = useNavigate()
 
   const [categories, setCategories] = useState<Category[]>([])
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
@@ -666,8 +663,7 @@ export default function TransactionsView() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Extratos & Faturas</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Importe extratos mensais ou o histórico da planilha de planejamento para alimentar seus
-            relatórios.
+            Importe extratos mensais ou faturas de cartão para alimentar seus relatórios.
           </p>
         </div>
 
@@ -708,92 +704,58 @@ export default function TransactionsView() {
         </div>
       </div>
 
-      {/* Tabs for choosing Importer mode */}
-      <Tabs defaultValue="statement" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 max-w-md bg-slate-100 p-1">
-          <TabsTrigger
-            value="statement"
-            className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-xs"
-          >
-            <UploadCloud className="h-3.5 w-3.5 mr-1.5 text-blue-600" />
-            Extratos & Faturas
-          </TabsTrigger>
-          <TabsTrigger
-            value="planning"
-            className="text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-xs"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
-            Planilha Planejamento
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Tab 1: Planning Sheet Importer */}
-        <TabsContent value="planning" className="pt-3">
-          <PlanningImporter
-            onSuccess={() => {
-              loadCategories()
-              loadTransactionsList()
-            }}
-            onNavigateToBudgetVsActual={() => navigate('/orcado-vs-realizado')}
-            onNavigateToOverview={() => navigate('/')}
-          />
-        </TabsContent>
-
-        {/* Tab 2: Standard Statement Importer (CSV, XLSX, PDF) */}
-        <TabsContent value="statement" className="pt-3">
-          <div
-            onClick={() => !isProcessingFile && fileInputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault()
-              const file = e.dataTransfer.files?.[0]
-              if (file) {
-                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-                  processPdfFile(file)
-                } else {
-                  // CSV / TXT / XLS
-                  const dt = new DataTransfer()
-                  dt.items.add(file)
-                  if (fileInputRef.current) {
-                    fileInputRef.current.files = dt.files
-                    fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }))
-                  }
-                }
+      {/* Standard Statement Importer Dropzone (CSV, XLSX, PDF) */}
+      <div
+        onClick={() => !isProcessingFile && fileInputRef.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          const file = e.dataTransfer.files?.[0]
+          if (file) {
+            if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+              processPdfFile(file)
+            } else {
+              // CSV / TXT / XLS
+              const dt = new DataTransfer()
+              dt.items.add(file)
+              if (fileInputRef.current) {
+                fileInputRef.current.files = dt.files
+                fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }))
               }
-            }}
-            className={`group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20 ${
-              isProcessingFile ? 'opacity-60 cursor-not-allowed' : ''
-            }`}
-          >
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform">
-              {isProcessingFile ? (
-                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-              ) : (
-                <div className="flex items-center -space-x-1.5">
-                  <FileText className="h-6 w-6 text-red-500" />
-                  <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-                </div>
-              )}
+            }
+          }
+        }}
+        className={`group relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition-all hover:border-blue-500 hover:bg-blue-50/20 ${
+          isProcessingFile ? 'opacity-60 cursor-not-allowed' : ''
+        }`}
+      >
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform">
+          {isProcessingFile ? (
+            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+          ) : (
+            <div className="flex items-center -space-x-1.5">
+              <FileText className="h-6 w-6 text-red-500" />
+              <FileSpreadsheet className="h-6 w-6 text-blue-600" />
             </div>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">
-              {isProcessingFile
-                ? 'Processando documento no navegador...'
-                : 'Clique ou arraste seu extrato bancário ou fatura (CSV, XLSX ou PDF)'}
-            </h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              Categorização automática, detecção de valores, datas, descrições e câmbio mensal
-              automático.
-            </p>
-            <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-blue-600 flex-wrap justify-center">
-              <span>
-                PDFs de cartões & contas: Nubank, Itaú, Bradesco, Millennium BCP, CGD, Santander,
-                Inter e C6
-              </span>
-              <ArrowRight className="h-3 w-3" />
-            </div>
-          </div>
-        </TabsContent>
-      </Tabs>
+          )}
+        </div>
+        <h3 className="mt-3 text-sm font-bold text-slate-900">
+          {isProcessingFile
+            ? 'Processando documento no navegador...'
+            : 'Clique ou arraste seu extrato bancário ou fatura (CSV, XLSX ou PDF)'}
+        </h3>
+        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+          Categorização automática, detecção de valores, datas, descrições e câmbio mensal
+          automático.
+        </p>
+        <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-blue-600 flex-wrap justify-center">
+          <span>
+            PDFs de cartões & contas: Nubank, Itaú, Bradesco, Millennium BCP, CGD, Santander, Inter
+            e C6
+          </span>
+          <ArrowRight className="h-3 w-3" />
+        </div>
+      </div>
 
       {/* Filters Bar */}
       <Card className="border-slate-200 shadow-xs">
