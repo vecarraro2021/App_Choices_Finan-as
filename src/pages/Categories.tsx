@@ -542,8 +542,7 @@ export default function CategoriesView() {
             onClick={() => handleOpenAdd('sub')}
             className="border-slate-300 hover:bg-slate-100"
           >
-            <Plus className="mr-1.5 h-4 w-4" />
-            Nova Subcategoria
+            Subcategoria
           </Button>
 
           <Button
@@ -551,7 +550,7 @@ export default function CategoriesView() {
             className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
           >
             <FolderPlus className="mr-2 h-4 w-4" />
-            Nova Categoria Principal
+            Nova Categoria
           </Button>
         </div>
       </div>
