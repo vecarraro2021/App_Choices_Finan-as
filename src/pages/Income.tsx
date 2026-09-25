@@ -405,12 +405,7 @@ export default function IncomeView() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              Receitas & Entradas Financeiras
-            </h1>
-            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold text-xs">
-              Recorrência Ativa
-            </Badge>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receitas</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             Gestão de receitas recorrentes mensais e aportes pontuais convertidos para Real (R$) com
@@ -418,24 +413,7 @@ export default function IncomeView() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={handleOpenAddRecurring}
-            variant="outline"
-            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-semibold shadow-xs"
-          >
-            <Repeat className="mr-2 h-4 w-4" />
-            Nova Receita Recorrente
-          </Button>
-
-          <Button
-            onClick={() => setShowAddModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 font-semibold shadow-xs"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Nova Entrada Pontual
-          </Button>
-        </div>
+        <div className="flex items-center gap-2"></div>
       </div>
 
       {/* Warning Banner if Expenses exceed Income */}
