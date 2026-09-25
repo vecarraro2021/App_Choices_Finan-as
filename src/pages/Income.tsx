@@ -408,8 +408,7 @@ export default function IncomeView() {
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receitas</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Gestão de receitas recorrentes mensais e aportes pontuais convertidos para Real (R$) com
-            base no câmbio do mês correspondente.
+            Adicione suas receitias recorrentes ou entradas pontuais
           </p>
         </div>
 
