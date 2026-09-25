@@ -530,12 +530,9 @@ export default function CategoriesView() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Taxonomia de Categorias
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Categorias</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Estrutura de 2 níveis com orçamentos mensais estimados. Totalmente editável e
-            personalizável.
+            Personalize seus gastos por categorias e subcategorias&nbsp;
           </p>
         </div>
 
