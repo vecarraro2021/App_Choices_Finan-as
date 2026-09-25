@@ -74,15 +74,12 @@ export default function Layout() {
             <span className="font-bold text-base text-slate-900 tracking-tight leading-none">
               Planejamento
             </span>
-            <span className="text-xs text-blue-600 font-medium">Financeiro 2026</span>
+            <span className="text-xs text-blue-600 font-medium">Financeiro</span>
           </div>
         </div>
 
         {/* Nav Links */}
         <nav className="flex-1 space-y-1.5 p-4">
-          <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-            Menu Principal
-          </div>
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive = location.pathname === item.path
