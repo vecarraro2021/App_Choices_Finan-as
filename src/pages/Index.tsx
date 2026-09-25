@@ -553,19 +553,43 @@ export default function Index() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(val: any) => {
+                        content={({ active, payload }) => {
+                          if (!active || !payload || !payload.length) return null
+                          const data = payload[0].payload as {
+                            name: string
+                            value: number
+                            rawTotal: number
+                            percentage: number
+                            color: string
+                          }
                           const avgRate =
                             exchangeRates.length > 0
                               ? exchangeRates.reduce((a, b) => a + Number(b.rate), 0) /
                                 exchangeRates.length
                               : 6.0
-                          return [
-                            formatCurrency(
-                              Number(val) * (currency === 'EUR' ? avgRate : 1),
-                              currency,
-                              avgRate,
-                            ),
-                          ]
+                          const formattedValue = formatCurrency(
+                            Number(data.value) * (currency === 'EUR' ? avgRate : 1),
+                            currency,
+                            avgRate,
+                          )
+
+                          return (
+                            <div className="bg-white border border-slate-200 rounded-lg shadow-md p-2.5 text-xs">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: data.color }}
+                                />
+                                <span className="font-semibold text-slate-900">{data.name}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-3 text-slate-600">
+                                <span className="font-bold text-slate-900">{formattedValue}</span>
+                                <span className="text-slate-500 font-medium tabular-nums">
+                                  ({data.percentage.toFixed(1)}%)
+                                </span>
+                              </div>
+                            </div>
+                          )
                         }}
                       />
                     </PieChart>
