@@ -391,19 +391,12 @@ export default function Index() {
               </>
             ) : (
               <>
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`text-2xl font-bold tracking-tight ${
-                      metrics.overBudget > 0 ? 'text-red-600' : 'text-emerald-600'
-                    }`}
-                  >
-                    <CountUp value={Math.abs(metrics.overBudget)} currency={currency} />
-                  </div>
-                  {metrics.overBudget > 0 && (
-                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">
-                      +{formatPercent(metrics.overBudgetPct)}
-                    </Badge>
-                  )}
+                <div
+                  className={`text-2xl font-bold tracking-tight ${
+                    metrics.overBudget > 0 ? 'text-red-600' : 'text-emerald-600'
+                  }`}
+                >
+                  <CountUp value={Math.abs(metrics.overBudget)} currency={currency} />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
                   {metrics.overBudget > 0 ? 'Acima do planejado' : 'Dentro do orçamento'}
