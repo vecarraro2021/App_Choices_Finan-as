@@ -150,9 +150,6 @@ export default function Layout() {
               <span className="font-bold text-slate-900 text-lg hidden sm:inline">
                 Meu Planejamento Financeiro
               </span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                2026
-              </span>
             </div>
           </div>
 
