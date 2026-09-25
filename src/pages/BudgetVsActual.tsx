@@ -687,9 +687,9 @@ export default function BudgetVsActualView() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Orçado vs. Realizado</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Saídas financeiras</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Matriz analítica de acompanhamento orçamentário mensal com expansão de subcategorias.
+            Comparare valores orçado e realizado para acompanhar sua saúde financeira
           </p>
         </div>
 
@@ -702,14 +702,6 @@ export default function BudgetVsActualView() {
           >
             <Download className="mr-2 h-4 w-4 text-emerald-600" />
             Exportar CSV
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setShowOfficialModal(true)}
-            className="border-slate-300 hover:bg-slate-100"
-          >
-            <Scale className="mr-2 h-4 w-4 text-blue-600" />
-            Declarar Total Oficial (Auditoria)
           </Button>
         </div>
       </div>
@@ -756,10 +748,6 @@ export default function BudgetVsActualView() {
             <CardDescription className="text-xs flex flex-wrap items-center gap-1.5 mt-0.5">
               <span>
                 Valores em formato Real / Orçado. Células vermelhas indicam estouro orçamentário.
-              </span>
-              <span className="hidden sm:inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-medium text-[11px] border border-blue-100">
-                <GripVertical className="h-3 w-3" /> Arraste subcategorias entre categorias para
-                reorganizar
               </span>
             </CardDescription>
           </div>
