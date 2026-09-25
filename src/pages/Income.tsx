@@ -546,16 +546,9 @@ export default function IncomeView() {
         <CardHeader className="p-4 bg-emerald-50/50 border-b border-emerald-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <Repeat className="h-5 w-5 text-emerald-600" />
               <CardTitle className="text-base font-bold text-slate-900">
                 Receitas Recorrentes Mensais ({recurringIncomes.length})
               </CardTitle>
-              <Badge
-                variant="outline"
-                className="border-emerald-300 text-emerald-700 bg-white text-[11px]"
-              >
-                Automático
-              </Badge>
             </div>
             <CardDescription className="text-xs text-slate-600 mt-0.5">
               Entradas fixas computadas automaticamente em todos os meses (passados e futuros) sem
