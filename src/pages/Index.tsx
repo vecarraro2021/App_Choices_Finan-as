@@ -279,10 +279,9 @@ export default function Index() {
       {/* Executive Summary Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resumo Executivo</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Consolidado analítico com conversão automática de cada lançamento pela taxa média do mês
-            correspondente.
+            Visão resumida do seu planejemento financeiro
           </p>
         </div>
 
@@ -298,26 +297,7 @@ export default function Index() {
       </div>
 
       {/* Empty State when no transactions yet */}
-      {transactions.length === 0 && !loading && (
-        <Card className="border-dashed border-2 border-slate-300 bg-white/80 p-8 text-center shadow-xs">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 mb-4">
-            <UploadCloud className="h-7 w-7" />
-          </div>
-          <h3 className="text-lg font-bold text-slate-900 mb-1">
-            Nenhum lançamento financeiro registrado
-          </h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
-            A base de dados inicia limpa para manter sua privacidade. Faça o upload das suas faturas
-            em CSV ou XLSX na tela de importação para alimentar seus gráficos e gerar diagnósticos.
-          </p>
-          <div className="flex justify-center gap-3">
-            <Button onClick={() => navigate('/extratos')} className="bg-blue-600 hover:bg-blue-700">
-              <UploadCloud className="mr-2 h-4 w-4" />
-              Importar Extratos Agora
-            </Button>
-          </div>
-        </Card>
-      )}
+      {transactions.length === 0 && !loading && null}
 
       {/* Metric Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
