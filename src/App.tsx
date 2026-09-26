@@ -11,6 +11,7 @@ import IncomeView from '@/pages/Income'
 import BudgetVsActualView from '@/pages/BudgetVsActual'
 import CategoriesView from '@/pages/Categories'
 import AlertsView from '@/pages/Alerts'
+import ConsultantView from '@/pages/Consultant'
 import NotFound from '@/pages/NotFound'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/orcado-vs-realizado" element={<BudgetVsActualView />} />
             <Route path="/categorias" element={<CategoriesView />} />
             <Route path="/alertas" element={<AlertsView />} />
+            <Route path="/consultor" element={<ConsultantView />} />
           </Route>
 
           {/* Catch-all */}

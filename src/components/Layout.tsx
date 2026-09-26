@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   Wallet,
+  MessageSquareText,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -33,6 +34,7 @@ const navItems = [
   { path: '/orcado-vs-realizado', label: 'Orçado vs Realizado', icon: Scale },
   { path: '/categorias', label: 'Categorias', icon: FolderTree },
   { path: '/alertas', label: 'Alertas & Insights', icon: AlertTriangle },
+  { path: '/consultor', label: 'Meu Consultor', icon: MessageSquareText },
 ]
 
 export default function Layout() {
@@ -263,6 +265,18 @@ export default function Layout() {
         <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-xs text-slate-500">
           Dados exibidos conforme planejamento 2026. Atualize os dados mensalmente.
         </footer>
+
+        {/* Botão circular verde de chat no canto inferior direito para acesso rápido ao consultor */}
+        {location.pathname !== '/consultor' && (
+          <button
+            onClick={() => navigate('/consultor')}
+            title="Abrir Meu Consultor Financeiro"
+            aria-label="Abrir Meu Consultor Financeiro"
+            className="fixed bottom-20 lg:bottom-8 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#10B981] hover:bg-[#059669] text-white shadow-xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95 cursor-pointer focus:outline-hidden focus:ring-4 focus:ring-emerald-400/30"
+          >
+            <MessageSquareText className="h-7 w-7 text-white fill-white/10 stroke-[2.2]" />
+          </button>
+        )}
       </div>
 
       {/* Mobile Bottom Tab Bar */}
