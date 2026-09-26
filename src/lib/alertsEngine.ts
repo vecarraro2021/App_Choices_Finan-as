@@ -25,6 +25,13 @@ export interface ComputedAlert {
   deficitMonths?: DeficitMonthItem[]
 }
 
+// Re-export insights engine for convenience and single import surface
+export {
+  generateFinancialInsights,
+  type InsightItem,
+  type GenerateInsightsParams,
+} from './insightsEngine'
+
 /**
  * Shared helper to calculate monthly deficits comparing total monthly expenses
  * against punctual income + active recurring incomes (converted via monthly exchange rate).

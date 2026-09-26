@@ -1,90 +1,55 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/hooks/use-realtime'
-import {
-  getAllTransactions,
-  getCategories,
-  getIncomes,
-  getRecurringIncomes,
-  getMonthlyTotals,
-  getExchangeRates,
-  getUserSettings,
-} from '@/services/financeService'
-import { computeAndSyncAlerts } from '@/lib/alertsEngine'
-import {
-  Alert,
-  Category,
-  Income,
-  RecurringIncome,
-  MonthlyTotal,
-  Transaction,
-  UserSettings,
-  ExchangeRate,
-} from '@/types/finance'
-import { formatCurrency, formatMonthShort } from '@/lib/formatters'
-import { ShieldAlert, AlertTriangle, Info, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { getAllTransactions, getCategories, getUserSettings } from '@/services/financeService'
+import { Category, Transaction, UserSettings } from '@/types/finance'
+import { formatMonthShort, MONTH_NAMES_SHORT } from '@/lib/formatters'
+import { Calendar as CalendarIcon, RefreshCw, ChevronDown } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { InsightsList } from '@/components/InsightsList'
+import { generateFinancialInsights } from '@/lib/insightsEngine'
 
 export default function AlertsView() {
   const { user, currency } = useAuth()
   const { toast } = useToast()
+
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [alerts, setAlerts] = useState<Alert[]>([])
-  const [stats, setStats] = useState({ critical: 0, warning: 0, info: 0 })
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
 
-  const runEngine = async () => {
+  // Filter state: 'all' for all months consolidated, or specific month string 'YYYY-MM'
+  const [selectedMonth, setSelectedMonth] = useState<string>('all')
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
+
+  const loadData = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, incs, recIncs, mTotals, settings, rates] = await Promise.all([
+      const [txs, cats, settings] = await Promise.all([
         getAllTransactions(),
         getCategories(),
-        getIncomes(),
-        getRecurringIncomes(),
-        getMonthlyTotals(),
         getUserSettings(),
-        getExchangeRates(),
       ])
 
-      const computed = await computeAndSyncAlerts(
-        txs,
-        incs,
-        cats,
-        mTotals,
-        recIncs,
-        settings,
-        rates,
-      )
-
-      const mapped: Alert[] = computed.map((c, i) => ({
-        id: `alert-${i}`,
-        user: user?.id || '',
-        severity: c.severity,
-        title: c.title,
-        description: c.description,
-        suggestion: c.suggestion,
-        deficitMonths: c.deficitMonths,
-      }))
-
-      setAlerts(mapped)
-      setStats({
-        critical: mapped.filter((a) => a.severity === 'critical').length,
-        warning: mapped.filter((a) => a.severity === 'warning').length,
-        info: mapped.filter((a) => a.severity === 'info').length,
-      })
-
-      toast({
-        title: 'Diagnósticos recalculados',
-        description: `${mapped.length} alertas e recomendações atualizados.`,
-      })
+      setTransactions(txs)
+      setCategories(cats)
+      setUserSettings(settings)
     } catch (err) {
-      console.error('Erro ao reprocessar alertas:', err)
+      console.error('Erro ao carregar dados de insights:', err)
       toast({
-        title: 'Erro ao recalcular',
-        description: 'Não foi possível reavaliar os alertas.',
+        title: 'Erro ao carregar',
+        description: 'Não foi possível carregar os dados de insights.',
         variant: 'destructive',
       })
     } finally {
@@ -94,183 +59,284 @@ export default function AlertsView() {
   }
 
   useEffect(() => {
-    runEngine()
+    loadData()
   }, [user?.id])
 
-  useRealtime('transactions', () => runEngine())
-  useRealtime('income', () => runEngine())
-  useRealtime('recurring_incomes', () => runEngine())
-  useRealtime('categories', () => runEngine())
-  useRealtime('exchange_rates', () => runEngine())
-  useRealtime('user_settings', () => runEngine())
+  useRealtime('transactions', () => loadData())
+  useRealtime('categories', () => loadData())
+  useRealtime('user_settings', () => loadData())
+
+  // Available months options (derived from transactions or 2026 default, same as Dashboard)
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    // Include 2026 months by default
+    for (let i = 1; i <= 12; i++) {
+      set.add(`2026-${String(i).padStart(2, '0')}`)
+    }
+    transactions.forEach((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
+    return Array.from(set).sort()
+  }, [transactions])
+
+  // Helper format for month dropdown label (e.g. "Jan 2026")
+  const formatMonthLabel = (mStr: string) => {
+    if (!mStr || !mStr.includes('-')) return mStr
+    const [year, month] = mStr.split('-')
+    const idx = parseInt(month, 10) - 1
+    if (idx >= 0 && idx < 12) {
+      return `${MONTH_NAMES_SHORT[idx]} ${year}`
+    }
+    return mStr
+  }
+
+  // Label for trigger button
+  const filterTriggerLabel = useMemo(() => {
+    if (selectedMonth === 'all') {
+      return 'Todos os meses'
+    }
+    return formatMonthLabel(selectedMonth)
+  }, [selectedMonth])
+
+  // Compute filtered transactions and intervalMonths
+  const filteredData = useMemo(() => {
+    if (selectedMonth === 'all') {
+      // Find all distinct months with data, or fallback to full 2026
+      const set = new Set<string>()
+      transactions.forEach((tx) => {
+        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+        if (m && m.length === 7) set.add(m)
+      })
+      const distinct = Array.from(set).sort()
+      const interval = distinct.length > 0 ? distinct : availableMonths
+      return {
+        txs: transactions,
+        intervalMonths: interval,
+      }
+    }
+
+    const txs = transactions.filter((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      return m === selectedMonth
+    })
+
+    return {
+      txs,
+      intervalMonths: [selectedMonth],
+    }
+  }, [selectedMonth, transactions, availableMonths])
+
+  // Generate insights using shared engine
+  const insights = useMemo(() => {
+    return generateFinancialInsights({
+      transactions: filteredData.txs,
+      categories,
+      currency,
+      intervalMonths: filteredData.intervalMonths,
+      userSettings,
+    })
+  }, [filteredData, categories, currency, userSettings])
+
+  // Quick stats from generated insights
+  const stats = useMemo(() => {
+    return {
+      critical: insights.filter((i) => i.badgeText === 'Atenção').length,
+      economy: insights.filter((i) => i.badgeText === 'Economia').length,
+      success: insights.filter((i) => i.badgeText === 'No caminho').length,
+      priority: insights.filter((i) => i.badgeText === 'Alta prioridade').length,
+      total: insights.length,
+    }
+  }, [insights])
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      {/* 1. Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Alertas, Inconsistências & Insights
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Alertas & Insights</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Motor analítico de regras financeiras baseado nos seus lançamentos, receitas e
-            orçamentos.
+            Motor analítico de regras financeiras baseado nos seus lançamentos e orçamentos.
           </p>
         </div>
 
-        <Button
-          onClick={runEngine}
-          disabled={refreshing}
-          variant="outline"
-          className="border-slate-300 hover:bg-slate-100 flex items-center gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-blue-600' : ''}`} />
-          {refreshing ? 'Recalculando regras...' : 'Recalcular Alertas'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* Dropdown de filtro por mês com ícone de calendário */}
+          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="bg-white border-slate-200 hover:bg-slate-50 text-slate-700 font-medium shadow-xs h-10 px-3.5 gap-2"
+              >
+                <CalendarIcon className="h-4 w-4 text-slate-500" />
+                <span className="text-xs sm:text-sm">{filterTriggerLabel}</span>
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-4 bg-white border-slate-200 shadow-lg">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-sm text-slate-900">Filtrar por Mês</h4>
+                  <p className="text-xs text-slate-500">
+                    Selecione um mês específico ou veja o consolidado de todos os meses.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-600">Período</label>
+                  <Select
+                    value={selectedMonth}
+                    onValueChange={(val) => {
+                      setSelectedMonth(val)
+                      setIsFilterOpen(false)
+                    }}
+                  >
+                    <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
+                      <SelectValue placeholder="Selecione o mês" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      <SelectItem value="all" className="text-xs font-medium">
+                        Todos os meses (Período completo)
+                      </SelectItem>
+                      {availableMonths.map((m) => (
+                        <SelectItem key={`filter-${m}`} value={m} className="text-xs">
+                          {formatMonthLabel(m)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Predefinições Rápidas */}
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-xs h-7 px-2 text-slate-600"
+                    onClick={() => {
+                      setSelectedMonth('all')
+                      setIsFilterOpen(false)
+                    }}
+                  >
+                    Todos os meses
+                  </Button>
+                  {availableMonths.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs h-7 px-2 text-slate-600"
+                      onClick={() => {
+                        // Select current/latest month
+                        const current = new Date().toISOString().slice(0, 7)
+                        const target = availableMonths.includes(current)
+                          ? current
+                          : availableMonths[availableMonths.length - 1]
+                        setSelectedMonth(target)
+                        setIsFilterOpen(false)
+                      }}
+                    >
+                      Mês atual
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            onClick={loadData}
+            disabled={refreshing}
+            variant="outline"
+            className="border-slate-300 hover:bg-slate-100 flex items-center gap-2 h-10 px-3.5 text-xs sm:text-sm"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-blue-600' : ''}`} />
+            <span className="hidden sm:inline">
+              {refreshing ? 'Recalculando...' : 'Recalcular'}
+            </span>
+          </Button>
+        </div>
       </div>
 
-      {/* Summary severity cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* 2. Resumo de estatísticas */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card className="border-red-200 bg-red-50/40">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-red-700">
-              Pontos Críticos
+          <CardHeader className="pb-1 pt-4 px-5">
+            <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-red-700">
+              Atenção
             </CardTitle>
-            <ShieldAlert className="h-5 w-5 text-red-600" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-5 pb-4 pt-0">
             <div className="text-2xl font-bold text-red-700 tabular-nums">{stats.critical}</div>
-            <p className="text-xs text-red-600/80 mt-1">Ausência de receita ou déficit severo</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-amber-200 bg-amber-50/40">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-amber-700">
-              Avisos e Desvios
-            </CardTitle>
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-700 tabular-nums">{stats.warning}</div>
-            <p className="text-xs text-amber-600/80 mt-1">Orçamento superado ou picos pontuais</p>
+            <p className="text-xs text-red-600/80 mt-0.5">Estouros e tendências de alta</p>
           </CardContent>
         </Card>
 
         <Card className="border-blue-200 bg-blue-50/40">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-blue-700">
-              Insights Estratégicos
+          <CardHeader className="pb-1 pt-4 px-5">
+            <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+              Economia
             </CardTitle>
-            <Info className="h-5 w-5 text-blue-600" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-700 tabular-nums">{stats.info}</div>
-            <p className="text-xs text-blue-600/80 mt-1">Concentração e oportunidades de corte</p>
+          <CardContent className="px-5 pb-4 pt-0">
+            <div className="text-2xl font-bold text-blue-700 tabular-nums">{stats.economy}</div>
+            <p className="text-xs text-blue-600/80 mt-0.5">Oportunidades de otimização</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardHeader className="pb-1 pt-4 px-5">
+            <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+              No caminho
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-4 pt-0">
+            <div className="text-2xl font-bold text-emerald-700 tabular-nums">{stats.success}</div>
+            <p className="text-xs text-emerald-600/80 mt-0.5">Metas dentro do planejado</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-purple-200 bg-purple-50/40">
+          <CardHeader className="pb-1 pt-4 px-5">
+            <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
+              Prioridades
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-4 pt-0">
+            <div className="text-2xl font-bold text-purple-700 tabular-nums">{stats.priority}</div>
+            <p className="text-xs text-purple-600/80 mt-0.5">Reserva e planejamento</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Alerts list */}
-      {alerts.length > 0 ? (
-        <div className="space-y-4">
-          {alerts.map((item, index) => (
-            <Card
-              key={item.id || index}
-              className={`border transition-all shadow-xs ${
-                item.severity === 'critical'
-                  ? 'border-red-300 bg-white hover:border-red-400'
-                  : item.severity === 'warning'
-                    ? 'border-amber-300 bg-white hover:border-amber-400'
-                    : 'border-blue-300 bg-white hover:border-blue-400'
-              }`}
-            >
-              <CardContent className="p-5">
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                      item.severity === 'critical'
-                        ? 'bg-red-100 text-red-600'
-                        : item.severity === 'warning'
-                          ? 'bg-amber-100 text-amber-600'
-                          : 'bg-blue-100 text-blue-600'
-                    }`}
-                  >
-                    {item.severity === 'critical' && <ShieldAlert className="h-5 w-5" />}
-                    {item.severity === 'warning' && <AlertTriangle className="h-5 w-5" />}
-                    {item.severity === 'info' && <Info className="h-5 w-5" />}
-                  </div>
-
-                  <div className="flex-1 space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                      <h3 className="font-bold text-base text-slate-900">{item.title}</h3>
-                      <Badge
-                        className={`w-fit text-[11px] font-bold uppercase px-2 py-0.5 ${
-                          item.severity === 'critical'
-                            ? 'bg-red-600 text-white hover:bg-red-700'
-                            : item.severity === 'warning'
-                              ? 'bg-amber-500 text-white hover:bg-amber-600'
-                              : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                      >
-                        {item.severity === 'critical'
-                          ? 'Crítico'
-                          : item.severity === 'warning'
-                            ? 'Atenção'
-                            : 'Insight'}
-                      </Badge>
-                    </div>
-
-                    <p className="text-sm text-slate-600 leading-relaxed">{item.description}</p>
-
-                    {item.deficitMonths && item.deficitMonths.length > 0 && (
-                      <div className="pt-1 pb-1">
-                        <p className="text-xs text-red-700 font-medium mb-2">
-                          Detalhamento por mês com saldo operacional negativo:
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {item.deficitMonths.map((d) => (
-                            <Badge
-                              key={d.month}
-                              variant="destructive"
-                              className="text-xs py-1 px-2.5 font-normal shadow-xs bg-red-600 hover:bg-red-700 text-white"
-                            >
-                              <strong>{formatMonthShort(d.month)}:</strong> déficit de{' '}
-                              {formatCurrency(d.deficit, currency)} (Gastos{' '}
-                              {formatCurrency(d.expense, currency)} vs Ganho{' '}
-                              {formatCurrency(d.income, currency)})
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="rounded-lg bg-slate-50 p-3 border border-slate-200/80 text-xs text-slate-800">
-                      <span className="font-bold text-slate-900 block mb-0.5">
-                        💡 Ação / Recomendação Estratégica:
-                      </span>
-                      {item.suggestion}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <Card className="border-slate-200 bg-white p-12 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 mb-3">
-            <CheckCircle2 className="h-6 w-6" />
+      {/* 3. Card com a lista compartilhada de insights */}
+      <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl">
+        <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base font-bold text-slate-900">
+              Insights & Recomendações
+            </CardTitle>
+            <CardDescription className="text-xs text-slate-500 mt-0.5">
+              {selectedMonth === 'all'
+                ? 'Sugestões consolidadas calculadas sobre todo o período disponível.'
+                : `Sugestões calculadas exclusivamente para ${formatMonthLabel(selectedMonth)}.`}
+            </CardDescription>
           </div>
-          <h3 className="text-base font-bold text-slate-900">
-            Nenhum desvio ou ponto de atenção detectado
-          </h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-            Seus lançamentos estão equilibrados ou sua base ainda aguarda importação de lançamentos
-            e receitas.
-          </p>
-        </Card>
-      )}
+          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+            {insights.length} {insights.length === 1 ? 'insight' : 'insights'}
+          </span>
+        </CardHeader>
+
+        <CardContent className="px-6 py-5">
+          <InsightsList
+            insights={insights}
+            emptyMessage={
+              selectedMonth === 'all'
+                ? 'Nenhum insight identificado para o período completo.'
+                : `Nenhum desvio ou insight identificado para ${formatMonthLabel(selectedMonth)}.`
+            }
+          />
+        </CardContent>
+      </Card>
     </div>
   )
 }

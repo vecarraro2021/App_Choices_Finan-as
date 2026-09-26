@@ -70,16 +70,8 @@ import {
   Tooltip,
   Legend,
 } from 'recharts'
-
-interface CustomInsightItem {
-  id: string
-  title: string
-  description: string
-  badgeText: string
-  badgeColor: string // bg & text classes
-  icon: React.ReactNode
-  order: number
-}
+import { InsightsList } from '@/components/InsightsList'
+import { generateFinancialInsights } from '@/lib/insightsEngine'
 
 export default function Index() {
   const { user, currency } = useAuth()
@@ -443,152 +435,14 @@ export default function Index() {
   }, [filteredData, categories])
 
   // Dynamic AI Agent Insights for the selected period
-  const agentInsights = useMemo<CustomInsightItem[]>(() => {
-    const { txs, intervalMonths } = filteredData
-    const result: CustomInsightItem[] = []
-    const monthsCount = Math.max(intervalMonths.length, 1)
-
-    // Build spending by main category
-    const mainCategories = categories.filter((c) => c.type === 'main')
-    const subToParent = new Map<string, string>()
-    categories
-      .filter((c) => c.type === 'sub' && c.parent)
-      .forEach((c) => {
-        subToParent.set(c.id, c.parent!)
-      })
-
-    const catTotals: Record<string, number> = {}
-    const catMonthly: Record<string, Record<string, number>> = {}
-    let totalSpent = 0
-
-    txs.forEach((tx) => {
-      const amt = Number(tx.amount) || 0
-      totalSpent += amt
-      let pId = tx.category
-      if (pId && subToParent.has(pId)) {
-        pId = subToParent.get(pId)
-      }
-      if (pId) {
-        catTotals[pId] = (catTotals[pId] || 0) + amt
-        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : 'm')
-        if (!catMonthly[pId]) catMonthly[pId] = {}
-        catMonthly[pId][m] = (catMonthly[pId][m] || 0) + amt
-      }
+  const agentInsights = useMemo(() => {
+    return generateFinancialInsights({
+      transactions: filteredData.txs,
+      categories,
+      currency,
+      intervalMonths: filteredData.intervalMonths,
+      monthlyAverage: metrics.monthlyAverage,
     })
-
-    // 1. Categoria com estouro orçamentário (Atenção)
-    for (const cat of mainCategories) {
-      const spent = catTotals[cat.id] || 0
-      const totalBudget = (Number(cat.estimated) || 0) * monthsCount
-      if (totalBudget > 0 && spent > totalBudget * 1.1) {
-        const overPct = Math.round(((spent - totalBudget) / totalBudget) * 100)
-        result.push({
-          id: `over-${cat.id}`,
-          title: `Gastos com ${cat.name} acima da meta`,
-          description: `Seus gastos com ${cat.name.toLowerCase()} ultrapassaram o orçado em ${overPct}%. Considere revisar o limite mensal.`,
-          badgeText: 'Atenção',
-          badgeColor: 'bg-red-100 text-red-700 border-red-200',
-          icon: <AlertTriangle className="h-5 w-5 text-red-500" />,
-          order: 1,
-        })
-        break // Take the most prominent
-      }
-    }
-
-    // 2. Oportunidade de economia na maior categoria (Economia)
-    const sortedCats = [...mainCategories].sort(
-      (a, b) => (catTotals[b.id] || 0) - (catTotals[a.id] || 0),
-    )
-    if (sortedCats.length > 0 && totalSpent > 0) {
-      const topCat = sortedCats[0]
-      const topSpent = catTotals[topCat.id] || 0
-      const potentialMonthlySavings = Math.round((topSpent / monthsCount) * 0.15)
-      if (potentialMonthlySavings > 50) {
-        result.push({
-          id: `opt-${topCat.id}`,
-          title: `Oportunidade de economia em ${topCat.name}`,
-          description: `Identificamos concentração relevante. Potencial de economia de aproximadamente ${formatCurrency(potentialMonthlySavings, currency)}/mês com pequenos ajustes.`,
-          badgeText: 'Economia',
-          badgeColor: 'bg-blue-100 text-blue-700 border-blue-200',
-          icon: <Sparkles className="h-5 w-5 text-blue-500" />,
-          order: 2,
-        })
-      }
-    }
-
-    // 3. Rebalancear orçamento ou tendência em categoria crescente (Atenção)
-    for (const cat of mainCategories) {
-      if (!result.find((r) => r.id.includes(cat.id))) {
-        const mObj = catMonthly[cat.id] || {}
-        const recorded = Object.keys(mObj).sort()
-        if (recorded.length >= 3) {
-          const last3 = recorded.slice(-3).map((m) => mObj[m])
-          if (last3[0] < last3[1] && last3[1] < last3[2]) {
-            result.push({
-              id: `trend-${cat.id}`,
-              title: `Rebalancear orçamento de ${cat.name}`,
-              description: `Tendência de aumento consecutivo nos últimos 3 meses analisados. Sugerimos monitorar e ajustar a meta.`,
-              badgeText: 'Atenção',
-              badgeColor: 'bg-red-100 text-red-700 border-red-200',
-              icon: <AlertTriangle className="h-5 w-5 text-red-500" />,
-              order: 3,
-            })
-            break
-          }
-        }
-      }
-    }
-
-    // 4. Meta dentro do planejado (No caminho)
-    for (const cat of mainCategories) {
-      const spent = catTotals[cat.id] || 0
-      const totalBudget = (Number(cat.estimated) || 0) * monthsCount
-      if (totalBudget > 0 && spent > 0 && spent <= totalBudget) {
-        const belowPct = Math.round(((totalBudget - spent) / totalBudget) * 100)
-        result.push({
-          id: `ok-${cat.id}`,
-          title: `Meta de ${cat.name} dentro do planejado`,
-          description: `Parabéns! Seus gastos com ${cat.name.toLowerCase()} estão ${belowPct}% abaixo do orçado no período.`,
-          badgeText: 'No caminho',
-          badgeColor: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-          icon: <CheckCircle2 className="h-5 w-5 text-emerald-500" />,
-          order: 4,
-        })
-        break
-      }
-    }
-
-    // 5. Categoria de Assinaturas ou Serviços (Economia)
-    const subCatMain = mainCategories.find(
-      (c) =>
-        c.name.toLowerCase().includes('assinatura') || c.name.toLowerCase().includes('serviço'),
-    )
-    if (subCatMain && (catTotals[subCatMain.id] || 0) > 0) {
-      const monthlySub = (catTotals[subCatMain.id] || 0) / monthsCount
-      const estimatedSaving = Math.round(monthlySub * 0.25)
-      result.push({
-        id: `subs-${subCatMain.id}`,
-        title: `Renegociar ${subCatMain.name}`,
-        description: `Serviços recorrentes ativos identificados. Economia estimada em até ${formatCurrency(estimatedSaving, currency)}/mês ao revisar planos.`,
-        badgeText: 'Economia',
-        badgeColor: 'bg-blue-100 text-blue-700 border-blue-200',
-        icon: <Repeat className="h-5 w-5 text-blue-500" />,
-        order: 5,
-      })
-    }
-
-    // 6. Reserva de emergência (Alta prioridade)
-    result.push({
-      id: 'emergency-reserve',
-      title: 'Criar reserva de emergência',
-      description: `Com base no seu perfil e run-rate, recomendamos manter uma reserva entre 3x e 6x a média mensal de gastos (${formatCurrency(metrics.monthlyAverage * 6, currency)}).`,
-      badgeText: 'Alta prioridade',
-      badgeColor: 'bg-purple-100 text-purple-700 border-purple-200',
-      icon: <Target className="h-5 w-5 text-purple-600" />,
-      order: 6,
-    })
-
-    return result.sort((a, b) => a.order - b.order)
   }, [filteredData, categories, currency, metrics.monthlyAverage])
 
   // Format today's date in PT-BR for "Atualizado em DD/MM/YYYY"
@@ -964,32 +818,8 @@ export default function Index() {
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="px-6 py-4 space-y-3">
-              {agentInsights.slice(0, 6).map((insight) => (
-                <div
-                  key={insight.id}
-                  className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors flex items-start gap-3.5"
-                >
-                  <div className="p-2 rounded-lg bg-white border border-slate-200/60 shadow-2xs shrink-0 mt-0.5">
-                    {insight.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="font-semibold text-xs text-slate-900 truncate">
-                        {insight.title}
-                      </h4>
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${insight.badgeColor}`}
-                      >
-                        {insight.badgeText}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
-                      {insight.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
+            <CardContent className="px-6 py-4">
+              <InsightsList insights={agentInsights} limit={6} />
             </CardContent>
           </div>
 
