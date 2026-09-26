@@ -122,7 +122,15 @@ export default function Index() {
       setBankAccounts(banks)
 
       // Compute and sync dynamic alerts
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs, settings)
+      const computed = await computeAndSyncAlerts(
+        txs,
+        incs,
+        cats,
+        mTotals,
+        recIncs,
+        settings,
+        ratesList,
+      )
       setAlerts(
         computed.map((c, i) => ({
           id: `comp-${i}`,
@@ -131,6 +139,7 @@ export default function Index() {
           title: c.title,
           description: c.description,
           suggestion: c.suggestion,
+          deficitMonths: c.deficitMonths,
         })),
       )
     } catch (err) {
@@ -947,19 +956,12 @@ export default function Index() {
         <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl flex flex-col justify-between">
           <div>
             <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100">
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold text-slate-900">
-                    Ações & Insights do Agente Financeiro
-                  </CardTitle>
-                  <CardDescription className="text-xs text-slate-500 mt-0.5">
-                    Sugestões personalizadas baseadas na análise dos seus dados financeiros.
-                  </CardDescription>
-                </div>
-                <div className="h-7 w-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-              </div>
+              <CardTitle className="text-base font-bold text-slate-900">
+                Ações & Insights do Agente Financeiro
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-500 mt-0.5">
+                Sugestões personalizadas baseadas na análise dos seus dados financeiros.
+              </CardDescription>
             </CardHeader>
 
             <CardContent className="px-6 py-4 space-y-3">

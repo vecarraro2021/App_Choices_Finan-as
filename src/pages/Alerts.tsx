@@ -7,6 +7,8 @@ import {
   getIncomes,
   getRecurringIncomes,
   getMonthlyTotals,
+  getExchangeRates,
+  getUserSettings,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
 import {
@@ -17,8 +19,9 @@ import {
   MonthlyTotal,
   Transaction,
   UserSettings,
+  ExchangeRate,
 } from '@/types/finance'
-import { getUserSettings } from '@/services/financeService'
+import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { ShieldAlert, AlertTriangle, Info, RefreshCw, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,7 +29,7 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 
 export default function AlertsView() {
-  const { user } = useAuth()
+  const { user, currency } = useAuth()
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -36,16 +39,25 @@ export default function AlertsView() {
   const runEngine = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, incs, recIncs, mTotals, settings] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals, settings, rates] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
         getRecurringIncomes(),
         getMonthlyTotals(),
         getUserSettings(),
+        getExchangeRates(),
       ])
 
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs, settings)
+      const computed = await computeAndSyncAlerts(
+        txs,
+        incs,
+        cats,
+        mTotals,
+        recIncs,
+        settings,
+        rates,
+      )
 
       const mapped: Alert[] = computed.map((c, i) => ({
         id: `alert-${i}`,
@@ -54,6 +66,7 @@ export default function AlertsView() {
         title: c.title,
         description: c.description,
         suggestion: c.suggestion,
+        deficitMonths: c.deficitMonths,
       }))
 
       setAlerts(mapped)
@@ -88,6 +101,8 @@ export default function AlertsView() {
   useRealtime('income', () => runEngine())
   useRealtime('recurring_incomes', () => runEngine())
   useRealtime('categories', () => runEngine())
+  useRealtime('exchange_rates', () => runEngine())
+  useRealtime('user_settings', () => runEngine())
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -207,6 +222,28 @@ export default function AlertsView() {
                     </div>
 
                     <p className="text-sm text-slate-600 leading-relaxed">{item.description}</p>
+
+                    {item.deficitMonths && item.deficitMonths.length > 0 && (
+                      <div className="pt-1 pb-1">
+                        <p className="text-xs text-red-700 font-medium mb-2">
+                          Detalhamento por mês com saldo operacional negativo:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {item.deficitMonths.map((d) => (
+                            <Badge
+                              key={d.month}
+                              variant="destructive"
+                              className="text-xs py-1 px-2.5 font-normal shadow-xs bg-red-600 hover:bg-red-700 text-white"
+                            >
+                              <strong>{formatMonthShort(d.month)}:</strong> déficit de{' '}
+                              {formatCurrency(d.deficit, currency)} (Gastos{' '}
+                              {formatCurrency(d.expense, currency)} vs Ganho{' '}
+                              {formatCurrency(d.income, currency)})
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="rounded-lg bg-slate-50 p-3 border border-slate-200/80 text-xs text-slate-800">
                       <span className="font-bold text-slate-900 block mb-0.5">

@@ -72,6 +72,13 @@ export interface RecurringIncome {
   updated?: string
 }
 
+export interface DeficitMonthDetail {
+  month: string
+  deficit: number
+  income: number
+  expense: number
+}
+
 export interface Alert {
   id: string
   user: string
@@ -80,6 +87,7 @@ export interface Alert {
   title: string
   description: string
   suggestion: string
+  deficitMonths?: DeficitMonthDetail[]
   created?: string
   updated?: string
 }

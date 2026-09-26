@@ -959,6 +959,7 @@ export async function clearAndSaveAlerts(
     title: string
     description: string
     suggestion: string
+    deficitMonths?: any
   }>,
 ): Promise<void> {
   const userId = pb.authStore.record?.id
@@ -981,7 +982,10 @@ export async function clearAndSaveAlerts(
   for (const item of alertsList) {
     try {
       await pb.collection('alerts').create({
-        ...item,
+        severity: item.severity,
+        title: item.title,
+        description: item.description,
+        suggestion: item.suggestion,
         user: userId,
         owner: userId,
       })

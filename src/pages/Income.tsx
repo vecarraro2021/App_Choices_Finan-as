@@ -15,6 +15,7 @@ import {
   getRateForMonth,
 } from '@/services/financeService'
 import { Income, RecurringIncome, Transaction, ExchangeRate } from '@/types/finance'
+import { calculateMonthlyDeficits } from '@/lib/alertsEngine'
 import { formatCurrency, formatPercent, formatMonthLong, formatMonthShort } from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
@@ -172,39 +173,13 @@ export default function IncomeView() {
     // Savings rate = (income - expenses) / income
     const savingsRate = totalIncome > 0 ? (totalIncome - totalExpenses) / totalIncome : 0
 
-    // Monthly deficit check
-    const expensesByMonth: Record<string, number> = {}
-    transactions.forEach((tx) => {
-      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-      if (m) {
-        expensesByMonth[m] = (expensesByMonth[m] || 0) + (Number(tx.amount) || 0)
-      }
-    })
-
-    const punctualByMonth: Record<string, number> = {}
-    incomes.forEach((inc) => {
-      const mRate = getRateForMonth(inc.month, exchangeRates)
-      const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * mRate
-      punctualByMonth[inc.month] = (punctualByMonth[inc.month] || 0) + valBrl
-    })
-
-    const deficitMonths: { month: string; deficit: number; income: number; expense: number }[] = []
-    Object.keys(expensesByMonth).forEach((m) => {
-      const mRate = getRateForMonth(m, exchangeRates)
-      const recurringForMonth = activeRecurringList.reduce((acc, r) => {
-        return acc + (Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate)
-      }, 0)
-      const inc = (punctualByMonth[m] || 0) + recurringForMonth
-      const exp = expensesByMonth[m] || 0
-      if (exp > inc) {
-        deficitMonths.push({
-          month: m,
-          deficit: exp - inc,
-          income: inc,
-          expense: exp,
-        })
-      }
-    })
+    // Monthly deficit check using shared helper
+    const deficitMonths = calculateMonthlyDeficits(
+      transactions,
+      incomes,
+      recurringIncomes,
+      exchangeRates,
+    )
 
     return {
       activeRecurringMonthlyBrl,
@@ -414,38 +389,6 @@ export default function IncomeView() {
 
         <div className="flex items-center gap-2"></div>
       </div>
-
-      {/* Warning Banner if Expenses exceed Income */}
-      {metrics.deficitMonths.length > 0 && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-xs">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-red-900">
-                Alerta de Saúde Financeira: Despesas excedem receitas
-              </h3>
-              <p className="text-xs text-red-700 mt-0.5 leading-relaxed">
-                Foram identificados meses com saldo operacional negativo onde o custo de vida
-                superou a soma da renda recorrente + pontual declarada:
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {metrics.deficitMonths.map((d) => (
-                  <Badge
-                    key={d.month}
-                    variant="destructive"
-                    className="text-xs py-1 px-2 font-normal"
-                  >
-                    <strong>{formatMonthShort(d.month)}:</strong> déficit de{' '}
-                    {formatCurrency(d.deficit, currency)} (Gastos{' '}
-                    {formatCurrency(d.expense, currency)} vs Ganho{' '}
-                    {formatCurrency(d.income, currency)})
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">

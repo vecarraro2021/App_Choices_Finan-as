@@ -3,23 +3,81 @@ import {
   Income,
   RecurringIncome,
   Category,
-  Alert,
+  ExchangeRate,
   MonthlyTotal,
   UserSettings,
 } from '@/types/finance'
-import { clearAndSaveAlerts } from '@/services/financeService'
+import { clearAndSaveAlerts, getRateForMonth } from '@/services/financeService'
 import { formatCurrency, formatMonthLong, formatMonthShort } from '@/lib/formatters'
+
+export interface DeficitMonthItem {
+  month: string
+  deficit: number
+  income: number
+  expense: number
+}
 
 export interface ComputedAlert {
   severity: 'critical' | 'warning' | 'info'
   title: string
   description: string
   suggestion: string
+  deficitMonths?: DeficitMonthItem[]
+}
+
+/**
+ * Shared helper to calculate monthly deficits comparing total monthly expenses
+ * against punctual income + active recurring incomes (converted via monthly exchange rate).
+ */
+export function calculateMonthlyDeficits(
+  transactions: Transaction[],
+  incomes: Income[],
+  recurringIncomes: RecurringIncome[],
+  exchangeRates: ExchangeRate[] = [],
+): DeficitMonthItem[] {
+  const activeRecurringList = recurringIncomes.filter((r) => r.active)
+
+  const expensesByMonth: Record<string, number> = {}
+  transactions.forEach((tx) => {
+    const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+    if (m) {
+      expensesByMonth[m] = (expensesByMonth[m] || 0) + (Number(tx.amount) || 0)
+    }
+  })
+
+  const punctualByMonth: Record<string, number> = {}
+  incomes.forEach((inc) => {
+    const mRate = getRateForMonth(inc.month, exchangeRates)
+    const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * mRate
+    punctualByMonth[inc.month] = (punctualByMonth[inc.month] || 0) + valBrl
+  })
+
+  const deficitMonths: DeficitMonthItem[] = []
+  const sortedMonths = Object.keys(expensesByMonth).sort()
+
+  sortedMonths.forEach((m) => {
+    const mRate = getRateForMonth(m, exchangeRates)
+    const recurringForMonth = activeRecurringList.reduce((acc, r) => {
+      return acc + (Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate)
+    }, 0)
+    const inc = (punctualByMonth[m] || 0) + recurringForMonth
+    const exp = expensesByMonth[m] || 0
+    if (exp > inc) {
+      deficitMonths.push({
+        month: m,
+        deficit: exp - inc,
+        income: inc,
+        expense: exp,
+      })
+    }
+  })
+
+  return deficitMonths
 }
 
 /**
  * Computes alerts dynamically based on actual database records:
- * (a) Sem receita registrada em mês com despesas -> critical (receitas recorrentes ativas cobrem automaticamente)
+ * (a) Alerta de Saúde Financeira: Despesas excedem receitas (agregado com detalhamento mensal) -> critical
  * (b) Orçamento mensal superado -> warning com % (mês e categoria)
  * (c) Categoria concentra > 25% do gasto total -> info
  * (d) Pico atípico: categoria com gasto mensal > 2.5x da própria média histórica -> warning
@@ -32,6 +90,7 @@ export async function computeAndSyncAlerts(
   monthlyTotals: MonthlyTotal[] = [],
   recurringIncomes: RecurringIncome[] = [],
   userSettings?: UserSettings | null,
+  exchangeRates: ExchangeRate[] = [],
 ): Promise<ComputedAlert[]> {
   const alerts: ComputedAlert[] = []
 
@@ -68,29 +127,53 @@ export async function computeAndSyncAlerts(
   const incomeByMonth: Record<string, number> = {}
   for (const inc of incomes) {
     const m = inc.month
-    incomeByMonth[m] = (incomeByMonth[m] || 0) + (Number(inc.amount_brl) || 0)
+    const mRate = getRateForMonth(m, exchangeRates)
+    const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * mRate
+    incomeByMonth[m] = (incomeByMonth[m] || 0) + valBrl
   }
 
-  // Rule (a): No income registered in a month with expenses -> Critical
+  // Rule (a1): Meses com despesa mas absolutamente zero receita (recorrente + pontual)
   const monthsWithExpenses = Object.keys(expensesByMonth).sort()
-  for (const m of monthsWithExpenses) {
-    const punctualInc = incomeByMonth[m] || 0
-    const incVal = punctualInc + activeRecurringSumBrl
-    const expVal = expensesByMonth[m]
-    if (incVal === 0 && expVal > 0) {
+  if (userSettings?.notify_monthly_summary !== false) {
+    for (const m of monthsWithExpenses) {
+      const punctualInc = incomeByMonth[m] || 0
+      const mRate = getRateForMonth(m, exchangeRates)
+      const recurringForMonth = recurringIncomes
+        .filter((r) => r.active)
+        .reduce((sum, r) => sum + (Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate), 0)
+      const incVal = punctualInc + recurringForMonth
+      const expVal = expensesByMonth[m]
+      if (incVal === 0 && expVal > 0) {
+        alerts.push({
+          severity: 'critical',
+          title: `Ponto Cego: Sem receita registrada em ${formatMonthShort(m)}`,
+          description: `Há um total de ${formatCurrency(expVal, 'BRL')} em despesas registradas em ${formatMonthLong(m)}, porém nenhuma entrada financeira vinculada. Sem receita, não é possível calcular taxa de poupança ou saúde financeira real.`,
+          suggestion: `Acesse a aba "Receitas" e cadastre suas receitas recorrentes automáticas ou pontuais deste mês.`,
+        })
+      }
+    }
+  }
+
+  // Rule (a2): Alerta de Saúde Financeira: Despesas excedem receitas (migrado de Receitas)
+  // Respeita toggle de notificações: associado a notify_monthly_summary
+  if (userSettings?.notify_monthly_summary !== false) {
+    const deficitMonths = calculateMonthlyDeficits(
+      transactions,
+      incomes,
+      recurringIncomes,
+      exchangeRates,
+    )
+    if (deficitMonths.length > 0) {
+      const totalDeficit = deficitMonths.reduce((sum, d) => sum + d.deficit, 0)
+      const monthsCount = deficitMonths.length
       alerts.push({
         severity: 'critical',
-        title: `Ponto Cego: Sem receita registrada em ${formatMonthShort(m)}`,
-        description: `Há um total de ${formatCurrency(expVal, 'BRL')} em despesas registradas em ${formatMonthLong(m)}, porém nenhuma entrada financeira vinculada. Sem receita, não é possível calcular taxa de poupança ou saúde financeira real.`,
-        suggestion: `Acesse a aba "Receitas" e cadastre suas receitas recorrentes automáticas ou pontuais deste mês.`,
-      })
-    } else if (incVal > 0 && expVal > incVal) {
-      const deficit = expVal - incVal
-      alerts.push({
-        severity: 'warning',
-        title: `Despesas excedem receitas em ${formatMonthShort(m)}`,
-        description: `Gastos (${formatCurrency(expVal, 'BRL')}) superaram os ganhos (${formatCurrency(incVal, 'BRL')}) em ${formatCurrency(deficit, 'BRL')}.`,
-        suggestion: `Avalie despesas não recorrentes no mês ou ajuste os aportes para evitar endividamento.`,
+        title: 'Alerta de Saúde Financeira: Despesas excedem receitas',
+        description: `Foram identificados ${monthsCount} ${
+          monthsCount === 1 ? 'mês' : 'meses'
+        } com saldo operacional negativo onde o custo de vida superou a soma da renda recorrente + pontual declarada (déficit acumulado de ${formatCurrency(totalDeficit, 'BRL')}).`,
+        suggestion: `Avalie despesas não recorrentes nos meses deficitários, otimize custos fixos ou incremente as fontes de receita para evitar consumo de reservas.`,
+        deficitMonths,
       })
     }
   }
@@ -208,7 +291,7 @@ export async function computeAndSyncAlerts(
   const severityOrder = { critical: 0, warning: 1, info: 2 }
   alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
 
-  // Sync to database in background
+  // Sync to database in background (alerts serialized for persistent store)
   try {
     await clearAndSaveAlerts(alerts)
   } catch (err) {
