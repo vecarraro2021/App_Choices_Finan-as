@@ -23,7 +23,7 @@ import type { DisplayMessage } from '@/lib/skipAi'
 const SUGGESTION_CHIPS = [
   'Como está meu mês até agora?',
   'Quais categorias mais pesaram este mês?',
-  'Registrar gasto de R$ 45 no mercado hoje',
+  'Crie um relatório do último mês',
   'Tenho contas pendentes para pagar?',
 ]
 
