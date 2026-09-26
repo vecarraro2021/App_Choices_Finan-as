@@ -734,7 +734,6 @@ export default function TransactionsView() {
             <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
           ) : (
             <div className="flex items-center -space-x-1.5">
-              <FileText className="h-6 w-6 text-red-500" />
               <FileSpreadsheet className="h-6 w-6 text-blue-600" />
             </div>
           )}
