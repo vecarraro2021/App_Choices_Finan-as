@@ -32,7 +32,7 @@ const navItems = [
   { path: '/', label: 'Visão Geral', icon: LayoutDashboard },
   { path: '/extratos', label: 'Extratos & Faturas', icon: FileSpreadsheet },
   { path: '/receitas', label: 'Receitas', icon: TrendingUp },
-  { path: '/orcado-vs-realizado', label: 'Orçado vs Realizado', icon: Scale },
+  { path: '/orcado-vs-realizado', label: 'Meu Orçamento', icon: Scale },
   { path: '/categorias', label: 'Categorias', icon: FolderTree },
   { path: '/alertas', label: 'Alertas & Insights', icon: AlertTriangle },
   { path: '/consultor', label: 'Meu Consultor', icon: MessageSquareText },
