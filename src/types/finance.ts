@@ -102,3 +102,31 @@ export interface UserProfile {
   name?: string
   avatar?: string
 }
+
+export type BankAccountType = 'checking' | 'savings' | 'international' | 'investment' | 'wallet'
+export type BankAccountStatus = 'connected' | 'pending' | 'error' | 'disconnected'
+
+export interface BankAccount {
+  id: string
+  owner: string
+  name: string
+  account_type: BankAccountType
+  balance: number
+  currency: 'BRL' | 'EUR' | 'USD'
+  status: BankAccountStatus
+  color?: string
+  last_synced?: string
+  created?: string
+  updated?: string
+}
+
+export interface UserSettings {
+  id: string
+  owner: string
+  notify_budget_overflow: boolean
+  notify_atypical_transactions: boolean
+  notify_accounting_divergence: boolean
+  notify_monthly_summary: boolean
+  created?: string
+  updated?: string
+}

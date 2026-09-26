@@ -5,6 +5,7 @@ import {
   Category,
   Alert,
   MonthlyTotal,
+  UserSettings,
 } from '@/types/finance'
 import { clearAndSaveAlerts } from '@/services/financeService'
 import { formatCurrency, formatMonthLong, formatMonthShort } from '@/lib/formatters'
@@ -30,6 +31,7 @@ export async function computeAndSyncAlerts(
   categories: Category[],
   monthlyTotals: MonthlyTotal[] = [],
   recurringIncomes: RecurringIncome[] = [],
+  userSettings?: UserSettings | null,
 ): Promise<ComputedAlert[]> {
   const alerts: ComputedAlert[] = []
 
@@ -97,35 +99,36 @@ export async function computeAndSyncAlerts(
   const categoryMap = new Map<string, Category>()
   categories.forEach((c) => categoryMap.set(c.id, c))
 
-  // Rule (b): Monthly category budget exceeded
-  // Compare estimated for main categories vs actual
-  for (const cat of categories) {
-    if (cat.type === 'main' && cat.estimated && cat.estimated > 0) {
-      for (const m of monthsWithExpenses) {
-        // Find subcategories belonging to this main category
-        const subCatIds = categories.filter((sc) => sc.parent === cat.id).map((sc) => sc.id)
-        const relatedCatIds = [cat.id, ...subCatIds]
+  // Rule (b): Monthly category budget exceeded (filtrado por userSettings.notify_budget_overflow)
+  if (userSettings?.notify_budget_overflow !== false) {
+    for (const cat of categories) {
+      if (cat.type === 'main' && cat.estimated && cat.estimated > 0) {
+        for (const m of monthsWithExpenses) {
+          // Find subcategories belonging to this main category
+          const subCatIds = categories.filter((sc) => sc.parent === cat.id).map((sc) => sc.id)
+          const relatedCatIds = [cat.id, ...subCatIds]
 
-        let spentInCatMonth = 0
-        for (const cid of relatedCatIds) {
-          spentInCatMonth += expensesByCategoryMonth[cid]?.[m] || 0
-        }
+          let spentInCatMonth = 0
+          for (const cid of relatedCatIds) {
+            spentInCatMonth += expensesByCategoryMonth[cid]?.[m] || 0
+          }
 
-        if (spentInCatMonth > cat.estimated * 1.15) {
-          const pct = Math.round(((spentInCatMonth - cat.estimated) / cat.estimated) * 100)
-          alerts.push({
-            severity: 'warning',
-            title: `Orçamento de ${cat.name} estourado em ${formatMonthShort(m)} (+${pct}%)`,
-            description: `Gasto de ${formatCurrency(spentInCatMonth, 'BRL')} superou o orçamento estimado de ${formatCurrency(cat.estimated, 'BRL')}.`,
-            suggestion: `Verifique os lançamentos da categoria ${cat.name} em ${formatMonthShort(m)} e analise possíveis cortes para o próximo ciclo.`,
-          })
+          if (spentInCatMonth > cat.estimated * 1.15) {
+            const pct = Math.round(((spentInCatMonth - cat.estimated) / cat.estimated) * 100)
+            alerts.push({
+              severity: 'warning',
+              title: `Orçamento de ${cat.name} estourado em ${formatMonthShort(m)} (+${pct}%)`,
+              description: `Gasto de ${formatCurrency(spentInCatMonth, 'BRL')} superou o orçamento estimado de ${formatCurrency(cat.estimated, 'BRL')}.`,
+              suggestion: `Verifique os lançamentos da categoria ${cat.name} em ${formatMonthShort(m)} e analise possíveis cortes para o próximo ciclo.`,
+            })
+          }
         }
       }
     }
   }
 
-  // Rule (c): Category concentration > 25% of total spending
-  if (totalSpending > 0) {
+  // Rule (c): Category concentration > 25% of total spending (filtrado por userSettings.notify_monthly_summary)
+  if (userSettings?.notify_monthly_summary !== false && totalSpending > 0) {
     for (const cat of categories) {
       if (cat.type === 'main') {
         const subCatIds = categories.filter((sc) => sc.parent === cat.id).map((sc) => sc.id)
@@ -150,8 +153,8 @@ export async function computeAndSyncAlerts(
     }
   }
 
-  // Rule (d): Atypical Spike (> 2.5x historical category monthly average)
-  if (monthsWithExpenses.length >= 2) {
+  // Rule (d): Atypical Spike (> 2.5x historical category monthly average) (filtrado por userSettings.notify_atypical_transactions)
+  if (userSettings?.notify_atypical_transactions !== false && monthsWithExpenses.length >= 2) {
     for (const cat of categories) {
       if (cat.type === 'main') {
         const subCatIds = categories.filter((sc) => sc.parent === cat.id).map((sc) => sc.id)
@@ -188,18 +191,19 @@ export async function computeAndSyncAlerts(
     }
   }
 
-  // Rule (e): Divergence between sum of categories and official total
-  for (const mt of monthlyTotals) {
-    if (mt.divergence && Math.abs(mt.divergence) > 1) {
-      alerts.push({
-        severity: 'warning',
-        title: `Divergência contábil em ${formatMonthShort(mt.month)} (${formatCurrency(mt.divergence, 'BRL')})`,
-        description: `A soma dos lançamentos por categoria difere do total oficial informado para o mês de ${formatMonthLong(mt.month)}.`,
-        suggestion: `Audite as transações deste mês para verificar itens não classificados ou valores faltantes no extrato.`,
-      })
+  // Rule (e): Divergence between sum of categories and official total (filtrado por userSettings.notify_accounting_divergence)
+  if (userSettings?.notify_accounting_divergence !== false) {
+    for (const mt of monthlyTotals) {
+      if (mt.divergence && Math.abs(mt.divergence) > 1) {
+        alerts.push({
+          severity: 'warning',
+          title: `Divergência contábil em ${formatMonthShort(mt.month)} (${formatCurrency(mt.divergence, 'BRL')})`,
+          description: `A soma dos lançamentos por categoria difere do total oficial informado para o mês de ${formatMonthLong(mt.month)}.`,
+          suggestion: `Audite as transações deste mês para verificar itens não classificados ou valores faltantes no extrato.`,
+        })
+      }
     }
   }
-
   // Sort: critical -> warning -> info
   const severityOrder = { critical: 0, warning: 1, info: 2 }
   alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])

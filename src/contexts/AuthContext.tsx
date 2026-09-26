@@ -10,6 +10,12 @@ interface AuthContextType {
   setCurrency: (c: Currency) => void
   login: (email: string, pass: string) => Promise<void>
   register: (name: string, email: string, pass: string) => Promise<void>
+  updateProfile: (data: { name?: string }) => Promise<void>
+  changePassword: (
+    oldPassword: string,
+    newPassword: string,
+    passwordConfirm: string,
+  ) => Promise<void>
   logout: () => void
 }
 
@@ -217,6 +223,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }
 
+  const updateProfile = async (data: { name?: string }) => {
+    if (!pb.authStore.record?.id) throw new Error('Usuário não autenticado')
+    const updated = await pb.collection('users').update(pb.authStore.record.id, data)
+    setUser(updated)
+  }
+
+  const changePassword = async (
+    oldPassword: string,
+    newPassword: string,
+    passwordConfirm: string,
+  ) => {
+    if (!pb.authStore.record?.id) throw new Error('Usuário não autenticado')
+    const updated = await pb.collection('users').update(pb.authStore.record.id, {
+      oldPassword,
+      password: newPassword,
+      passwordConfirm,
+    })
+    setUser(updated)
+  }
+
   const logout = () => {
     pb.authStore.clear()
     setUser(null)
@@ -231,6 +257,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrency,
         login,
         register,
+        updateProfile,
+        changePassword,
         logout,
       }}
     >

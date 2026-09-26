@@ -12,6 +12,7 @@ import BudgetVsActualView from '@/pages/BudgetVsActual'
 import CategoriesView from '@/pages/Categories'
 import AlertsView from '@/pages/Alerts'
 import ConsultantView from '@/pages/Consultant'
+import SettingsView from '@/pages/Settings'
 import NotFound from '@/pages/NotFound'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="/categorias" element={<CategoriesView />} />
             <Route path="/alertas" element={<AlertsView />} />
             <Route path="/consultor" element={<ConsultantView />} />
+            <Route path="/configuracoes" element={<SettingsView />} />
           </Route>
 
           {/* Catch-all */}

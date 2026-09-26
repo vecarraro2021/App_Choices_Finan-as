@@ -15,6 +15,7 @@ import {
   X,
   Wallet,
   MessageSquareText,
+  Settings,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -210,9 +211,12 @@ export default function Layout() {
                   <FolderTree className="mr-2 h-4 w-4" />
                   Gerenciar Categorias
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/alertas')} className="cursor-pointer">
-                  <AlertTriangle className="mr-2 h-4 w-4" />
-                  Ver Alertas & Insights
+                <DropdownMenuItem
+                  onClick={() => navigate('/configuracoes')}
+                  className="cursor-pointer"
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configurações
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

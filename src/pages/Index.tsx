@@ -10,6 +10,7 @@ import {
   getMonthlyTotals,
   getExchangeRates,
   getRateForMonth,
+  getUserSettings,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
 import {
@@ -68,15 +69,15 @@ export default function Index() {
   // Load initial data
   const loadData = async () => {
     try {
-      const [txs, cats, incs, recIncs, mTotals, ratesList] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals, ratesList, settings] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
         getRecurringIncomes(),
         getMonthlyTotals(),
         getExchangeRates(),
+        getUserSettings(),
       ])
-
       setTransactions(txs)
       setCategories(cats)
       setIncomes(incs)
@@ -84,8 +85,8 @@ export default function Index() {
       setMonthlyTotals(mTotals)
       setExchangeRates(ratesList)
 
-      // Compute and sync dynamic alerts (considering active recurring incomes)
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs)
+      // Compute and sync dynamic alerts (considering active recurring incomes and user notification settings)
+      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs, settings)
       setAlerts(
         computed.map((c, i) => ({
           id: `comp-${i}`,

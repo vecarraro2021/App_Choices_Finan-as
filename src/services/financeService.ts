@@ -8,6 +8,8 @@ import {
   MonthlyTotal,
   ExchangeRate,
   EUR_EXCHANGE_RATE,
+  BankAccount,
+  UserSettings,
 } from '@/types/finance'
 
 // ==================== EXCHANGE RATES ====================
@@ -987,4 +989,98 @@ export async function clearAndSaveAlerts(
       /* intentionally ignored */
     }
   }
+}
+
+// ==================== BANK ACCOUNTS ====================
+export async function getBankAccounts(): Promise<BankAccount[]> {
+  const userId = pb.authStore.record?.id
+  const filter = userId ? `owner = '${userId}'` : undefined
+  return await pb.collection('bank_accounts').getFullList<BankAccount>({
+    filter,
+    sort: '-created',
+  })
+}
+
+export async function createBankAccount(data: {
+  name: string
+  account_type: BankAccount['account_type']
+  balance: number
+  currency: 'BRL' | 'EUR' | 'USD'
+  status: BankAccount['status']
+  color?: string
+  last_synced?: string
+}): Promise<BankAccount> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  return await pb.collection('bank_accounts').create<BankAccount>({
+    ...data,
+    owner: userId,
+  })
+}
+
+export async function updateBankAccount(
+  id: string,
+  data: Partial<Omit<BankAccount, 'id' | 'owner'>>,
+): Promise<BankAccount> {
+  return await pb.collection('bank_accounts').update<BankAccount>(id, data)
+}
+
+export async function syncBankAccount(id: string): Promise<BankAccount> {
+  const now = new Date().toISOString()
+  return await pb.collection('bank_accounts').update<BankAccount>(id, {
+    last_synced: now,
+    status: 'connected',
+  })
+}
+
+export async function deleteBankAccount(id: string): Promise<void> {
+  await pb.collection('bank_accounts').delete(id)
+}
+
+// ==================== USER SETTINGS ====================
+export const DEFAULT_USER_SETTINGS = {
+  notify_budget_overflow: true,
+  notify_atypical_transactions: true,
+  notify_accounting_divergence: true,
+  notify_monthly_summary: true,
+}
+
+export async function getUserSettings(): Promise<UserSettings> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  try {
+    const list = await pb.collection('user_settings').getFullList<UserSettings>({
+      filter: `owner = '${userId}'`,
+      limit: 1,
+    })
+    if (list.length > 0) {
+      return list[0]
+    }
+  } catch (err) {
+    console.warn('Erro ao carregar configurações de usuário:', err)
+  }
+
+  // Se não existir ainda, provisiona configurações padrão para este usuário
+  try {
+    return await pb.collection('user_settings').create<UserSettings>({
+      owner: userId,
+      ...DEFAULT_USER_SETTINGS,
+    })
+  } catch (createErr) {
+    console.error('Falha ao criar user_settings:', createErr)
+    return {
+      id: `local-${userId}`,
+      owner: userId,
+      ...DEFAULT_USER_SETTINGS,
+    }
+  }
+}
+
+export async function updateUserSettings(
+  id: string,
+  data: Partial<Omit<UserSettings, 'id' | 'owner'>>,
+): Promise<UserSettings> {
+  return await pb.collection('user_settings').update<UserSettings>(id, data)
 }

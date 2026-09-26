@@ -16,7 +16,9 @@ import {
   RecurringIncome,
   MonthlyTotal,
   Transaction,
+  UserSettings,
 } from '@/types/finance'
+import { getUserSettings } from '@/services/financeService'
 import { ShieldAlert, AlertTriangle, Info, RefreshCw, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -34,15 +36,16 @@ export default function AlertsView() {
   const runEngine = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, incs, recIncs, mTotals] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals, settings] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
         getRecurringIncomes(),
         getMonthlyTotals(),
+        getUserSettings(),
       ])
 
-      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs)
+      const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs, settings)
 
       const mapped: Alert[] = computed.map((c, i) => ({
         id: `alert-${i}`,

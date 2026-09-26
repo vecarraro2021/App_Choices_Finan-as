@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T15:41:52.358Z",
+  "generatedAt": "2026-09-26T19:05:25.322Z",
   "collections": [
     {
       "name": "users",
@@ -627,6 +627,148 @@
         "CREATE INDEX idx_catrules_user ON category_rules (user)",
         "CREATE INDEX idx_catrules_pattern ON category_rules (pattern)"
       ]
+    },
+    {
+      "name": "bank_accounts",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && owner = @request.auth.id",
+        "view": "@request.auth.id != '' && owner = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.owner = @request.auth.id",
+        "update": "@request.auth.id != '' && owner = @request.auth.id",
+        "delete": "@request.auth.id != '' && owner = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "account_type",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["checking", "savings", "international", "investment", "wallet"]
+        },
+        {
+          "name": "balance",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "currency",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["BRL", "EUR", "USD"]
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["connected", "pending", "error", "disconnected"]
+        },
+        {
+          "name": "color",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "last_synced",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_bank_accounts_owner ON bank_accounts (owner)",
+        "CREATE INDEX idx_bank_accounts_status ON bank_accounts (status)"
+      ]
+    },
+    {
+      "name": "user_settings",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && owner = @request.auth.id",
+        "view": "@request.auth.id != '' && owner = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.owner = @request.auth.id",
+        "update": "@request.auth.id != '' && owner = @request.auth.id",
+        "delete": "@request.auth.id != '' && owner = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "notify_budget_overflow",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "notify_atypical_transactions",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "notify_accounting_divergence",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "notify_monthly_summary",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_user_settings_owner ON user_settings (owner)"]
     }
   ]
 }
