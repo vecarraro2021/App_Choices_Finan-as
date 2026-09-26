@@ -46,6 +46,7 @@ export default function Layout() {
 
   // If on login/signup page, don't show navigation layout
   const isAuthPage = location.pathname === '/login' || location.pathname === '/cadastro'
+  const isConsultantPage = location.pathname === '/consultor'
 
   if (isAuthPage) {
     return (
@@ -133,7 +134,11 @@ export default function Layout() {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col min-w-0 pb-16 lg:pb-0">
+      <div
+        className={`flex flex-1 flex-col min-w-0 pb-16 lg:pb-0 ${
+          isConsultantPage ? 'h-screen overflow-hidden' : ''
+        }`}
+      >
         {/* Top Header Bar */}
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 lg:px-8 backdrop-blur-md">
           {/* Left Title / Mobile Toggle */}
@@ -261,26 +266,36 @@ export default function Layout() {
         )}
 
         {/* Page View */}
-        <main className="flex-1 p-4 lg:p-8 overflow-y-auto">
+        <main
+          className={
+            isConsultantPage
+              ? 'flex-1 overflow-hidden p-0 m-0 flex flex-col'
+              : 'flex-1 p-4 lg:p-8 overflow-y-auto'
+          }
+        >
           <Outlet />
         </main>
 
         {/* Simple Footer */}
-        <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-xs text-slate-500">
-          Dados exibidos conforme planejamento 2026. Atualize os dados mensalmente.
-        </footer>
-
-        {/* Botão circular verde de chat no canto inferior direito para acesso rápido ao consultor */}
-        {location.pathname !== '/consultor' && (
-          <button
-            onClick={() => navigate('/consultor')}
-            title="Abrir Meu Consultor Financeiro"
-            aria-label="Abrir Meu Consultor Financeiro"
-            className="fixed bottom-20 lg:bottom-8 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#10B981] hover:bg-[#059669] text-white shadow-xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95 cursor-pointer focus:outline-hidden focus:ring-4 focus:ring-emerald-400/30"
-          >
-            <MessageSquareText className="h-7 w-7 text-white fill-white/10 stroke-[2.2]" />
-          </button>
+        {!isConsultantPage && (
+          <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-xs text-slate-500">
+            Dados exibidos conforme planejamento 2026. Atualize os dados mensalmente.
+          </footer>
         )}
+
+        {/* Botão circular verde de chat no canto inferior direito */}
+        <button
+          onClick={() => {
+            if (location.pathname !== '/consultor') {
+              navigate('/consultor')
+            }
+          }}
+          title="Meu Consultor Financeiro"
+          aria-label="Meu Consultor Financeiro"
+          className="fixed bottom-20 lg:bottom-8 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#10B981] hover:bg-[#059669] text-white shadow-xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95 cursor-pointer focus:outline-hidden focus:ring-4 focus:ring-emerald-400/30"
+        >
+          <MessageSquareText className="h-7 w-7 text-white fill-white/10 stroke-[2.2]" />
+        </button>
       </div>
 
       {/* Mobile Bottom Tab Bar */}

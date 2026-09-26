@@ -228,9 +228,9 @@ export default function ConsultantView() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7.5rem)] max-h-[920px] rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+    <div className="flex flex-1 w-full h-full min-h-0 bg-white overflow-hidden">
       {/* Sidebar de Histórico (Desktop) */}
-      <aside className="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-slate-50/50 p-4">
+      <aside className="hidden md:flex w-72 flex-col border-r border-slate-200/80 bg-slate-50/50 p-4 shrink-0">
         <Button
           onClick={handleStartNewChat}
           variant="outline"
@@ -352,7 +352,7 @@ export default function ConsultantView() {
       )}
 
       {/* Área Principal de Chat */}
-      <main className="flex-1 flex flex-col min-w-0 bg-white relative">
+      <section className="flex-1 flex flex-col min-w-0 bg-white relative h-full">
         {/* Barra superior de controle para telas pequenas */}
         <div className="md:hidden flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
           <Button
@@ -387,7 +387,7 @@ export default function ConsultantView() {
             <div className="h-full flex flex-col items-center justify-center max-w-2xl mx-auto text-center px-2">
               {/* Ícone em quadrado arredondado escuro conforme imagem de referência */}
               <div className="h-14 w-14 rounded-2xl bg-[#1E293B] text-white flex items-center justify-center shadow-md mb-5">
-                <Bot className="h-7 w-7 text-white" />
+                <MessageSquare className="h-7 w-7 text-white" />
               </div>
 
               <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-2">
@@ -424,7 +424,7 @@ export default function ConsultantView() {
                   >
                     {!isUser && (
                       <div className="h-8 w-8 rounded-xl bg-[#1E293B] text-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
-                        <Bot className="h-4 w-4" />
+                        <MessageSquare className="h-4 w-4 text-white" />
                       </div>
                     )}
 
@@ -451,7 +451,7 @@ export default function ConsultantView() {
               {isStreaming && (
                 <div className="flex items-start gap-3 justify-start">
                   <div className="h-8 w-8 rounded-xl bg-[#1E293B] text-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs animate-pulse">
-                    <Bot className="h-4 w-4" />
+                    <MessageSquare className="h-4 w-4 text-white" />
                   </div>
 
                   <div className="rounded-2xl rounded-bl-xs px-4 py-3 text-sm leading-relaxed max-w-[85%] bg-slate-100/90 text-slate-800 border border-slate-200/60 shadow-2xs whitespace-pre-wrap">
@@ -530,11 +530,11 @@ export default function ConsultantView() {
 
             {/* Aviso no rodapé idêntico ao mock */}
             <p className="mt-2 text-center text-[11px] text-slate-400 leading-tight">
-              Pode cometer erros. Por isso, lembre-se de conferir informações relevantes.
+              Pode cometer erros. Por isso, limite-se ao conforto de informações relevantes.
             </p>
           </div>
         </div>
-      </main>
+      </section>
     </div>
   )
 }
