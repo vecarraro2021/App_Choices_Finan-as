@@ -11,6 +11,7 @@ import {
   getExchangeRates,
   getRateForMonth,
   getUserSettings,
+  getBankAccounts,
 } from '@/services/financeService'
 import { computeAndSyncAlerts } from '@/lib/alertsEngine'
 import {
@@ -21,8 +22,14 @@ import {
   Alert,
   MonthlyTotal,
   ExchangeRate,
+  BankAccount,
 } from '@/types/finance'
-import { formatCurrency, formatPercent, formatMonthShort } from '@/lib/formatters'
+import {
+  formatCurrency,
+  formatPercent,
+  formatMonthShort,
+  MONTH_NAMES_SHORT,
+} from '@/lib/formatters'
 import { CountUp } from '@/components/CountUp'
 import {
   TrendingDown,
@@ -32,13 +39,27 @@ import {
   ArrowRight,
   ShieldAlert,
   Info,
-  Calendar,
+  Calendar as CalendarIcon,
   Layers,
   Sparkles,
+  Scale,
+  ChevronDown,
+  CheckCircle2,
+  Check,
+  Target,
+  Repeat,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   ResponsiveContainer,
   BarChart,
@@ -48,10 +69,17 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  PieChart,
-  Pie,
-  Cell,
 } from 'recharts'
+
+interface CustomInsightItem {
+  id: string
+  title: string
+  description: string
+  badgeText: string
+  badgeColor: string // bg & text classes
+  icon: React.ReactNode
+  order: number
+}
 
 export default function Index() {
   const { user, currency } = useAuth()
@@ -64,12 +92,18 @@ export default function Index() {
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [monthlyTotals, setMonthlyTotals] = useState<MonthlyTotal[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
+
+  // Date Filter State
+  const [startMonth, setStartMonth] = useState<string>('2026-01')
+  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
 
   // Load initial data
   const loadData = async () => {
     try {
-      const [txs, cats, incs, recIncs, mTotals, ratesList, settings] = await Promise.all([
+      const [txs, cats, incs, recIncs, mTotals, ratesList, settings, banks] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getIncomes(),
@@ -77,6 +111,7 @@ export default function Index() {
         getMonthlyTotals(),
         getExchangeRates(),
         getUserSettings(),
+        getBankAccounts(),
       ])
       setTransactions(txs)
       setCategories(cats)
@@ -84,8 +119,9 @@ export default function Index() {
       setRecurringIncomes(recIncs)
       setMonthlyTotals(mTotals)
       setExchangeRates(ratesList)
+      setBankAccounts(banks)
 
-      // Compute and sync dynamic alerts (considering active recurring incomes and user notification settings)
+      // Compute and sync dynamic alerts
       const computed = await computeAndSyncAlerts(txs, incs, cats, mTotals, recIncs, settings)
       setAlerts(
         computed.map((c, i) => ({
@@ -113,25 +149,114 @@ export default function Index() {
   useRealtime('income', () => loadData())
   useRealtime('recurring_incomes', () => loadData())
   useRealtime('categories', () => loadData())
+  useRealtime('bank_accounts', () => loadData())
 
-  // Calculations for Metrics
-  const metrics = useMemo(() => {
-    const totalSpending = transactions.reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0)
-
-    // Get unique months with transactions
-    const monthsSet = new Set<string>()
+  // Available months options (derived from transactions or 2026 default)
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    // Include all 2026 months by default
+    for (let i = 1; i <= 12; i++) {
+      set.add(`2026-${String(i).padStart(2, '0')}`)
+    }
     transactions.forEach((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-      if (m) monthsSet.add(m)
+      if (m && m.length === 7) set.add(m)
+    })
+    incomes.forEach((inc) => {
+      if (inc.month && inc.month.length === 7) set.add(inc.month)
+    })
+    return Array.from(set).sort()
+  }, [transactions, incomes])
+
+  // Helper format for month dropdown label (e.g. "Jan 2026")
+  const formatMonthLabel = (mStr: string) => {
+    if (!mStr || !mStr.includes('-')) return mStr
+    const [year, month] = mStr.split('-')
+    const idx = parseInt(month, 10) - 1
+    if (idx >= 0 && idx < 12) {
+      return `${MONTH_NAMES_SHORT[idx]} ${year}`
+    }
+    return mStr
+  }
+
+  // Filtered transactions & incomes based on startMonth and endMonth
+  const filteredData = useMemo(() => {
+    const s = startMonth <= endMonth ? startMonth : endMonth
+    const e = startMonth <= endMonth ? endMonth : startMonth
+
+    const txs = transactions.filter((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      if (!m) return false
+      return m >= s && m <= e
     })
 
-    const hasTransactions = transactions.length > 0
-    const monthsCount = hasTransactions ? Math.max(monthsSet.size, 1) : 0
+    const incs = incomes.filter((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (!m) return false
+      return m >= s && m <= e
+    })
+
+    // Calculate all distinct months that fall within the selected interval [s, e]
+    // Generate consecutive month strings between s and e
+    const intervalMonths: string[] = []
+    let curr = s
+    while (curr <= e) {
+      intervalMonths.push(curr)
+      const [y, m] = curr.split('-').map(Number)
+      if (m === 12) {
+        curr = `${y + 1}-01`
+      } else {
+        curr = `${y}-${String(m + 1).padStart(2, '0')}`
+      }
+    }
+
+    return {
+      txs,
+      incs,
+      intervalMonths,
+      effectiveStart: s,
+      effectiveEnd: e,
+    }
+  }, [transactions, incomes, startMonth, endMonth])
+
+  // Total Income (Entrada) for the period: Punctual Incomes + Recurring Incomes * months
+  const totalIncome = useMemo(() => {
+    const { incs, intervalMonths } = filteredData
+    const activeRecurring = recurringIncomes.filter((r) => r.active)
+
+    // Sum punctual incomes in the period
+    let punctualSum = 0
+    incs.forEach((inc) => {
+      const mRate = getRateForMonth(inc.month, exchangeRates)
+      const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * mRate
+      punctualSum += valBrl
+    })
+
+    // Sum recurring income for each month in the interval
+    let recurringSum = 0
+    intervalMonths.forEach((m) => {
+      const mRate = getRateForMonth(m, exchangeRates)
+      activeRecurring.forEach((r) => {
+        recurringSum += Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate
+      })
+    })
+
+    return punctualSum + recurringSum
+  }, [filteredData, recurringIncomes, exchangeRates])
+
+  // Calculations for Metrics: Total Saída, Total Orçado, Estourado vs Orçado
+  const metrics = useMemo(() => {
+    const { txs, intervalMonths } = filteredData
+
+    // Total spending in BRL
+    const totalSpending = txs.reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0)
+
+    // Months count: number of distinct months in the selected interval
+    // If the interval has months, use that count
+    const monthsCount = intervalMonths.length > 0 ? intervalMonths.length : 1
     const monthlyAverage = monthsCount > 0 ? totalSpending / monthsCount : 0
 
-    // Sum monthly budget for all categories.
-    // Fonte da verdade são as subcategorias (evitando dupla contagem).
-    // Se uma categoria principal não tiver subcategorias, usa seu próprio orçamento.
+    // Monthly budget sum across main categories (from their subcategories)
     const mainCats = categories.filter((c) => c.type === 'main')
     const monthlyBudget = mainCats.reduce((acc, main) => {
       const subs = categories.filter((c) => c.parent === main.id)
@@ -141,15 +266,17 @@ export default function Index() {
       return acc + (Number(main.estimated) || 0)
     }, 0)
 
-    // If transactions exist, multiply by months count, otherwise by 1 month reference
-    const totalBudget = hasTransactions ? monthlyBudget * monthsCount : monthlyBudget
-    const overBudget = totalSpending - totalBudget
-    const overBudgetPct = totalBudget > 0 ? overBudget / totalBudget : 0
-    const isZeroState = totalSpending === 0 && totalBudget === 0
+    // Total Budget for the whole selected period = monthly budget * number of months
+    const totalBudget = monthlyBudget * monthsCount
 
-    // Find highest spending month
+    // Estourado vs Orçado
+    const diff = totalSpending - totalBudget
+    const overBudgetPct = totalBudget > 0 ? (diff / totalBudget) * 100 : 0
+    const isOverBudget = diff > 0
+
+    // Highest spending month inside the period
     const spendingByMonth: Record<string, number> = {}
-    transactions.forEach((tx) => {
+    txs.forEach((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : 'Outros')
       spendingByMonth[m] = (spendingByMonth[m] || 0) + (Number(tx.amount) || 0)
     })
@@ -165,20 +292,52 @@ export default function Index() {
 
     return {
       totalSpending,
-      monthlyAverage,
       totalBudget,
-      overBudget,
+      monthlyBudget,
+      diff,
       overBudgetPct,
-      isZeroState,
-      hasTransactions,
+      isOverBudget,
+      monthlyAverage,
+      monthsCount,
       highestMonth,
       highestAmount,
-      monthsCount,
+      hasTransactions: txs.length > 0,
     }
-  }, [transactions, categories])
+  }, [filteredData, categories])
 
-  // Data for Monthly Bar Chart (Real vs Orcado)
+  // Bank Accounts metrics: Saldo Disponível & Reserva Financeira
+  const bankMetrics = useMemo(() => {
+    const currentMonthKey = new Date().toISOString().slice(0, 7)
+    const currentEurRate = getRateForMonth(currentMonthKey, exchangeRates)
+
+    const totalBalanceBrl = bankAccounts.reduce((sum, acc) => {
+      const val = Number(acc.balance) || 0
+      if (acc.currency === 'EUR') {
+        return sum + val * currentEurRate
+      }
+      return sum + val
+    }, 0)
+
+    // Calculate months of expenses reserve: totalBalanceBrl / monthlyAverage
+    const monthsOfRunway = metrics.monthlyAverage > 0 ? totalBalanceBrl / metrics.monthlyAverage : 0
+
+    // Most recent sync date across accounts
+    const dates = bankAccounts
+      .map((a) => (a.last_synced ? new Date(a.last_synced).getTime() : 0))
+      .filter((d) => d > 0)
+    const lastSyncDate = dates.length > 0 ? new Date(Math.max(...dates)) : new Date()
+
+    return {
+      totalBalanceBrl,
+      monthsOfRunway,
+      hasAccounts: bankAccounts.length > 0,
+      lastSyncDate,
+    }
+  }, [bankAccounts, exchangeRates, metrics.monthlyAverage])
+
+  // Bar Chart Data: Real vs. Orçado for each month in the selected period
   const barChartData = useMemo(() => {
+    const { txs, intervalMonths } = filteredData
     const mainCats = categories.filter((c) => c.type === 'main')
     const monthlyBudget = mainCats.reduce((acc, main) => {
       const subs = categories.filter((c) => c.parent === main.id)
@@ -189,14 +348,14 @@ export default function Index() {
     }, 0)
 
     const monthMap: Record<string, number> = {}
-    transactions.forEach((tx) => {
+    txs.forEach((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : 'Sem data')
       monthMap[m] = (monthMap[m] || 0) + (Number(tx.amount) || 0)
     })
 
-    const sortedMonths = Object.keys(monthMap).sort()
-    return sortedMonths.map((m) => {
-      const realAmount = monthMap[m]
+    // Show all months in the interval, or months that have transactions if interval is huge
+    return intervalMonths.map((m) => {
+      const realAmount = monthMap[m] || 0
       const mRate = getRateForMonth(m, exchangeRates)
       return {
         month: formatMonthShort(m),
@@ -206,22 +365,27 @@ export default function Index() {
         orcado: currency === 'EUR' ? monthlyBudget / mRate : monthlyBudget,
       }
     })
-  }, [transactions, categories, currency, exchangeRates])
+  }, [filteredData, categories, currency, exchangeRates])
 
-  // Data for Category Donut Chart
-  const donutChartData = useMemo(() => {
+  // Category Distribution List (Replaces Donut)
+  const categoryDistribution = useMemo(() => {
+    const { txs } = filteredData
     const mainCategories = categories.filter((c) => c.type === 'main')
-    const catMap = new Map<string, { name: string; color: string; total: number }>()
+    const catMap = new Map<
+      string,
+      { id: string; name: string; color: string; total: number; estimated: number }
+    >()
 
     mainCategories.forEach((c) => {
       catMap.set(c.id, {
+        id: c.id,
         name: c.name,
         color: c.color || '#2563EB',
         total: 0,
+        estimated: Number(c.estimated) || 0,
       })
     })
 
-    // Subcategory to parent category map
     const subToParent = new Map<string, string>()
     categories
       .filter((c) => c.type === 'sub' && c.parent)
@@ -230,7 +394,7 @@ export default function Index() {
       })
 
     let totalAll = 0
-    transactions.forEach((tx) => {
+    txs.forEach((tx) => {
       const amt = Number(tx.amount) || 0
       totalAll += amt
       let targetCatId = tx.category
@@ -252,202 +416,435 @@ export default function Index() {
       }
     })
 
-    // For EUR display: average rate across all recorded transactions
-    const avgYearRate =
-      exchangeRates.length > 0
-        ? exchangeRates.reduce((a, b) => a + Number(b.rate), 0) / exchangeRates.length
-        : 6.0
-
-    const result = Array.from(catMap.values())
+    const list = Array.from(catMap.values())
       .filter((item) => item.total > 0)
-      .map((item) => ({
-        name: item.name,
-        value:
-          currency === 'EUR'
-            ? Number((item.total / avgYearRate).toFixed(2))
-            : Number(item.total.toFixed(2)),
-        rawTotal: item.total,
-        percentage: totalAll > 0 ? (item.total / totalAll) * 100 : 0,
-        color: item.color,
-      }))
-      .sort((a, b) => b.value - a.value)
+      .map((item) => {
+        const pct = totalAll > 0 ? (item.total / totalAll) * 100 : 0
+        return {
+          ...item,
+          percentage: pct,
+        }
+      })
+      .sort((a, b) => b.total - a.total)
 
-    return result
-  }, [transactions, categories, currency, exchangeRates])
+    return {
+      items: list,
+      totalAll,
+    }
+  }, [filteredData, categories])
+
+  // Dynamic AI Agent Insights for the selected period
+  const agentInsights = useMemo<CustomInsightItem[]>(() => {
+    const { txs, intervalMonths } = filteredData
+    const result: CustomInsightItem[] = []
+    const monthsCount = Math.max(intervalMonths.length, 1)
+
+    // Build spending by main category
+    const mainCategories = categories.filter((c) => c.type === 'main')
+    const subToParent = new Map<string, string>()
+    categories
+      .filter((c) => c.type === 'sub' && c.parent)
+      .forEach((c) => {
+        subToParent.set(c.id, c.parent!)
+      })
+
+    const catTotals: Record<string, number> = {}
+    const catMonthly: Record<string, Record<string, number>> = {}
+    let totalSpent = 0
+
+    txs.forEach((tx) => {
+      const amt = Number(tx.amount) || 0
+      totalSpent += amt
+      let pId = tx.category
+      if (pId && subToParent.has(pId)) {
+        pId = subToParent.get(pId)
+      }
+      if (pId) {
+        catTotals[pId] = (catTotals[pId] || 0) + amt
+        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : 'm')
+        if (!catMonthly[pId]) catMonthly[pId] = {}
+        catMonthly[pId][m] = (catMonthly[pId][m] || 0) + amt
+      }
+    })
+
+    // 1. Categoria com estouro orçamentário (Atenção)
+    for (const cat of mainCategories) {
+      const spent = catTotals[cat.id] || 0
+      const totalBudget = (Number(cat.estimated) || 0) * monthsCount
+      if (totalBudget > 0 && spent > totalBudget * 1.1) {
+        const overPct = Math.round(((spent - totalBudget) / totalBudget) * 100)
+        result.push({
+          id: `over-${cat.id}`,
+          title: `Gastos com ${cat.name} acima da meta`,
+          description: `Seus gastos com ${cat.name.toLowerCase()} ultrapassaram o orçado em ${overPct}%. Considere revisar o limite mensal.`,
+          badgeText: 'Atenção',
+          badgeColor: 'bg-red-100 text-red-700 border-red-200',
+          icon: <AlertTriangle className="h-5 w-5 text-red-500" />,
+          order: 1,
+        })
+        break // Take the most prominent
+      }
+    }
+
+    // 2. Oportunidade de economia na maior categoria (Economia)
+    const sortedCats = [...mainCategories].sort(
+      (a, b) => (catTotals[b.id] || 0) - (catTotals[a.id] || 0),
+    )
+    if (sortedCats.length > 0 && totalSpent > 0) {
+      const topCat = sortedCats[0]
+      const topSpent = catTotals[topCat.id] || 0
+      const potentialMonthlySavings = Math.round((topSpent / monthsCount) * 0.15)
+      if (potentialMonthlySavings > 50) {
+        result.push({
+          id: `opt-${topCat.id}`,
+          title: `Oportunidade de economia em ${topCat.name}`,
+          description: `Identificamos concentração relevante. Potencial de economia de aproximadamente ${formatCurrency(potentialMonthlySavings, currency)}/mês com pequenos ajustes.`,
+          badgeText: 'Economia',
+          badgeColor: 'bg-blue-100 text-blue-700 border-blue-200',
+          icon: <Sparkles className="h-5 w-5 text-blue-500" />,
+          order: 2,
+        })
+      }
+    }
+
+    // 3. Rebalancear orçamento ou tendência em categoria crescente (Atenção)
+    for (const cat of mainCategories) {
+      if (!result.find((r) => r.id.includes(cat.id))) {
+        const mObj = catMonthly[cat.id] || {}
+        const recorded = Object.keys(mObj).sort()
+        if (recorded.length >= 3) {
+          const last3 = recorded.slice(-3).map((m) => mObj[m])
+          if (last3[0] < last3[1] && last3[1] < last3[2]) {
+            result.push({
+              id: `trend-${cat.id}`,
+              title: `Rebalancear orçamento de ${cat.name}`,
+              description: `Tendência de aumento consecutivo nos últimos 3 meses analisados. Sugerimos monitorar e ajustar a meta.`,
+              badgeText: 'Atenção',
+              badgeColor: 'bg-red-100 text-red-700 border-red-200',
+              icon: <AlertTriangle className="h-5 w-5 text-red-500" />,
+              order: 3,
+            })
+            break
+          }
+        }
+      }
+    }
+
+    // 4. Meta dentro do planejado (No caminho)
+    for (const cat of mainCategories) {
+      const spent = catTotals[cat.id] || 0
+      const totalBudget = (Number(cat.estimated) || 0) * monthsCount
+      if (totalBudget > 0 && spent > 0 && spent <= totalBudget) {
+        const belowPct = Math.round(((totalBudget - spent) / totalBudget) * 100)
+        result.push({
+          id: `ok-${cat.id}`,
+          title: `Meta de ${cat.name} dentro do planejado`,
+          description: `Parabéns! Seus gastos com ${cat.name.toLowerCase()} estão ${belowPct}% abaixo do orçado no período.`,
+          badgeText: 'No caminho',
+          badgeColor: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+          icon: <CheckCircle2 className="h-5 w-5 text-emerald-500" />,
+          order: 4,
+        })
+        break
+      }
+    }
+
+    // 5. Categoria de Assinaturas ou Serviços (Economia)
+    const subCatMain = mainCategories.find(
+      (c) =>
+        c.name.toLowerCase().includes('assinatura') || c.name.toLowerCase().includes('serviço'),
+    )
+    if (subCatMain && (catTotals[subCatMain.id] || 0) > 0) {
+      const monthlySub = (catTotals[subCatMain.id] || 0) / monthsCount
+      const estimatedSaving = Math.round(monthlySub * 0.25)
+      result.push({
+        id: `subs-${subCatMain.id}`,
+        title: `Renegociar ${subCatMain.name}`,
+        description: `Serviços recorrentes ativos identificados. Economia estimada em até ${formatCurrency(estimatedSaving, currency)}/mês ao revisar planos.`,
+        badgeText: 'Economia',
+        badgeColor: 'bg-blue-100 text-blue-700 border-blue-200',
+        icon: <Repeat className="h-5 w-5 text-blue-500" />,
+        order: 5,
+      })
+    }
+
+    // 6. Reserva de emergência (Alta prioridade)
+    result.push({
+      id: 'emergency-reserve',
+      title: 'Criar reserva de emergência',
+      description: `Com base no seu perfil e run-rate, recomendamos manter uma reserva entre 3x e 6x a média mensal de gastos (${formatCurrency(metrics.monthlyAverage * 6, currency)}).`,
+      badgeText: 'Alta prioridade',
+      badgeColor: 'bg-purple-100 text-purple-700 border-purple-200',
+      icon: <Target className="h-5 w-5 text-purple-600" />,
+      order: 6,
+    })
+
+    return result.sort((a, b) => a.order - b.order)
+  }, [filteredData, categories, currency, metrics.monthlyAverage])
+
+  // Format today's date in PT-BR for "Atualizado em DD/MM/YYYY"
+  const formattedToday = useMemo(() => {
+    const today = bankMetrics.lastSyncDate
+    const d = String(today.getDate()).padStart(2, '0')
+    const m = String(today.getMonth() + 1).padStart(2, '0')
+    const y = today.getFullYear()
+    return `${d}/${m}/${y}`
+  }, [bankMetrics.lastSyncDate])
+
+  // Filter button display text
+  const filterLabel = useMemo(() => {
+    return `${formatMonthLabel(startMonth)} - ${formatMonthLabel(endMonth)}`
+  }, [startMonth, endMonth])
 
   return (
-    <div className="space-y-8 animate-fade-in pb-8">
-      {/* Executive Summary Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="space-y-6 animate-fade-in pb-12">
+      {/* 1. CABEÇALHO DA PÁGINA */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Visão resumida do seu planejemento financeiro
+          <p className="text-sm text-slate-500 mt-0.5">
+            Visão resumida do seu planejamento financeiro
           </p>
         </div>
 
+        {/* Seletor de Período por Data */}
         <div className="flex items-center gap-3">
+          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="bg-white border-slate-200 hover:bg-slate-50 text-slate-700 font-medium shadow-xs h-10 px-3.5 gap-2"
+              >
+                <CalendarIcon className="h-4 w-4 text-slate-500" />
+                <span className="text-xs sm:text-sm">{filterLabel}</span>
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 p-4 bg-white border-slate-200 shadow-lg">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-sm text-slate-900">Filtrar Período</h4>
+                  <p className="text-xs text-slate-500">
+                    Selecione o mês inicial e o mês final para recalcular os dados.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-600">Início</label>
+                    <Select
+                      value={startMonth}
+                      onValueChange={(val) => {
+                        setStartMonth(val)
+                      }}
+                    >
+                      <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
+                        <SelectValue placeholder="Mês inicial" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        {availableMonths.map((m) => (
+                          <SelectItem key={`start-${m}`} value={m} className="text-xs">
+                            {formatMonthLabel(m)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-600">Fim</label>
+                    <Select
+                      value={endMonth}
+                      onValueChange={(val) => {
+                        setEndMonth(val)
+                      }}
+                    >
+                      <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
+                        <SelectValue placeholder="Mês final" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        {availableMonths.map((m) => (
+                          <SelectItem key={`end-${m}`} value={m} className="text-xs">
+                            {formatMonthLabel(m)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Predefinições Rápidas */}
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-xs h-7 px-2 text-slate-600"
+                    onClick={() => {
+                      setStartMonth('2026-01')
+                      setEndMonth('2026-08')
+                      setIsFilterOpen(false)
+                    }}
+                  >
+                    Jan - Ago 2026
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-xs h-7 px-2 text-slate-600"
+                    onClick={() => {
+                      setStartMonth('2026-01')
+                      setEndMonth('2026-12')
+                      setIsFilterOpen(false)
+                    }}
+                  >
+                    Ano 2026 Completo
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           <Button
             onClick={() => navigate('/extratos')}
-            className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-sm"
+            className="hidden sm:flex bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs text-xs h-10 px-3.5"
           >
-            <UploadCloud className="mr-2 h-4 w-4" />
+            <UploadCloud className="mr-1.5 h-4 w-4" />
             Importar Extratos
           </Button>
         </div>
       </div>
 
-      {/* Empty State when no transactions yet */}
-      {transactions.length === 0 && !loading && null}
-
-      {/* Metric Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Total Gasto */}
-        <Card className="border-slate-200 shadow-xs hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Total Gasto
-            </CardTitle>
+      {/* 2. LINHA DE 3 CARDS DE MÉTRICA */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {/* Card 1: TOTAL ENTRADA */}
+        <Card className="border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow bg-white rounded-xl">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 px-6">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              TOTAL ENTRADA
+            </span>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-              <TrendingDown className="h-4 w-4" />
+              <TrendingUp className="h-4 w-4" />
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900 tracking-tight">
-              <CountUp value={metrics.totalSpending} currency={currency} />
+          <CardContent className="px-6 pb-5 pt-0">
+            <div className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+              <CountUp value={totalIncome} currency={currency} />
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              {metrics.hasTransactions
-                ? `${metrics.monthsCount} ${metrics.monthsCount === 1 ? 'mês analisado' : 'meses analisados'}`
-                : 'Nenhum mês analisado'}
+              {metrics.monthsCount === 1
+                ? '1 mês analisado'
+                : `${metrics.monthsCount} meses analisados`}
             </p>
           </CardContent>
         </Card>
 
-        {/* Card 2: Média Mensal */}
-        <Card className="border-slate-200 shadow-xs hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Média Mensal
-            </CardTitle>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
-              <Calendar className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900 tracking-tight">
-              <CountUp value={metrics.monthlyAverage} currency={currency} />
-            </div>
-            <p className="text-xs text-slate-500 mt-1">Run-rate de gastos mensais</p>
-          </CardContent>
-        </Card>
-
-        {/* Card 3: Total Orçado */}
-        <Card className="border-slate-200 shadow-xs hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Total Orçado
-            </CardTitle>
+        {/* Card 2: TOTAL SAÍDA */}
+        <Card className="border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow bg-white rounded-xl">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 px-6">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              TOTAL SAÍDA
+            </span>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-              <Layers className="h-4 w-4" />
+              <Scale className="h-4 w-4" />
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900 tracking-tight">
-              <CountUp value={metrics.totalBudget} currency={currency} />
+          <CardContent className="px-6 pb-5 pt-0">
+            <div className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+              <CountUp value={metrics.totalSpending} currency={currency} />
             </div>
             <p className="text-xs text-slate-500 mt-1">Soma das metas por categoria</p>
           </CardContent>
         </Card>
 
-        {/* Card 4: Estourado vs Orçado */}
-        <Card className="border-slate-200 shadow-xs hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Estourado vs Orçado
-            </CardTitle>
+        {/* Card 3: ESTOURADO VS ORÇADO (Badge vermelho alinhado com o valor, sem overflow) */}
+        <Card className="border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow bg-white rounded-xl">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 px-6">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              ESTOURADO VS ORÇADO
+            </span>
             <div
               className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                metrics.isZeroState
-                  ? 'bg-slate-100 text-slate-400'
-                  : metrics.overBudget > 0
-                    ? 'bg-red-50 text-red-600'
-                    : 'bg-emerald-50 text-emerald-600'
+                metrics.isOverBudget ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
               }`}
             >
-              {metrics.isZeroState ? (
-                <Layers className="h-4 w-4" />
-              ) : metrics.overBudget > 0 ? (
+              {metrics.isOverBudget ? (
                 <AlertTriangle className="h-4 w-4" />
               ) : (
-                <TrendingUp className="h-4 w-4" />
+                <Check className="h-4 w-4" />
               )}
             </div>
           </CardHeader>
-          <CardContent>
-            {metrics.isZeroState ? (
-              <>
-                <div className="text-2xl font-bold tracking-tight text-slate-400">—</div>
-                <p className="text-xs text-slate-500 mt-1">Sem dados ainda</p>
-              </>
-            ) : (
-              <>
-                <div
-                  className={`text-2xl font-bold tracking-tight ${
-                    metrics.overBudget > 0 ? 'text-red-600' : 'text-emerald-600'
+          <CardContent className="px-6 pb-5 pt-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`text-2xl font-bold tracking-tight tabular-nums ${
+                  metrics.isOverBudget ? 'text-red-600' : 'text-emerald-600'
+                }`}
+              >
+                <CountUp value={Math.abs(metrics.diff)} currency={currency} />
+              </span>
+              {metrics.totalBudget > 0 && (
+                <span
+                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold tabular-nums shrink-0 ${
+                    metrics.isOverBudget
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-emerald-100 text-emerald-700'
                   }`}
                 >
-                  <CountUp value={Math.abs(metrics.overBudget)} currency={currency} />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  {metrics.overBudget > 0 ? 'Acima do planejado' : 'Dentro do orçamento'}
-                </p>
-              </>
-            )}
+                  {metrics.isOverBudget ? '+' : '-'}
+                  {Math.abs(metrics.overBudgetPct).toFixed(1).replace('.', ',')}%
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {metrics.isOverBudget ? 'Acima do planejado' : 'Dentro do orçamento'}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Bar Chart: Gasto Real vs Orçado */}
-        <Card className="lg:col-span-7 border-slate-200 shadow-xs">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
+      {/* 3 & 4. SEÇÃO DO MEIO: GASTO REAL VS ORÇADO (2/3) + RESERVA & SALDO (1/3) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+        {/* Card Grande: Gasto Real vs. Orçado (2/3 = col-span-8) */}
+        <Card className="lg:col-span-8 border-slate-200/80 shadow-xs bg-white rounded-xl flex flex-col justify-between">
+          <CardHeader className="pb-2 pt-5 px-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
                 <CardTitle className="text-base font-bold text-slate-900">
                   Gasto Real vs. Orçado
                 </CardTitle>
-                <CardDescription className="text-xs">
+                <CardDescription className="text-xs text-slate-500">
                   Comparação mensal da execução orçamentária ({currency})
                 </CardDescription>
               </div>
               {metrics.highestMonth && (
-                <div className="text-right">
-                  <span className="text-[11px] text-slate-500 block">Pico de Gasto</span>
-                  <span className="text-xs font-bold text-red-600">
-                    {formatMonthShort(metrics.highestMonth)} (
-                    {formatCurrency(metrics.highestAmount, currency)})
-                  </span>
+                <div className="text-xs font-semibold text-red-600">
+                  Pico de Gasto {formatMonthShort(metrics.highestMonth)} (
+                  {formatCurrency(metrics.highestAmount, currency)})
                 </div>
               )}
             </div>
           </CardHeader>
-          <CardContent className="pt-4">
+          <CardContent className="px-6 pb-6 pt-3 flex-1">
             {barChartData.length > 0 ? (
               <div className="h-[280px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={barChartData}
-                    margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                     <XAxis
                       dataKey="month"
-                      tick={{ fill: '#64748B', fontSize: 12 }}
-                      stroke="#CBD5E1"
+                      tick={{ fill: '#64748B', fontSize: 11 }}
+                      stroke="#E2E8F0"
+                      tickLine={false}
                     />
-                    <YAxis tick={{ fill: '#64748B', fontSize: 12 }} stroke="#CBD5E1" />
+                    <YAxis
+                      tick={{ fill: '#64748B', fontSize: 11 }}
+                      stroke="#E2E8F0"
+                      tickLine={false}
+                    />
                     <Tooltip
                       formatter={(val: any, _name: any, item: any) => {
                         const mRate = item?.payload?.rate || 6.0
@@ -463,241 +860,206 @@ export default function Index() {
                         backgroundColor: '#FFFFFF',
                         borderRadius: 8,
                         border: '1px solid #E2E8F0',
+                        fontSize: 12,
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                    <Bar dataKey="real" name="Gasto Real" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="orcado" name="Orçado" fill="#CBD5E1" radius={[4, 4, 0, 0]} />
+                    <Bar
+                      dataKey="orcado"
+                      name="Orçado"
+                      fill="#E2E8F0"
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={32}
+                    />
+                    <Bar
+                      dataKey="real"
+                      name="Gasto Real"
+                      fill="#3B82F6"
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={32}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             ) : (
               <div className="flex flex-col h-[280px] items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-lg bg-slate-50/50">
-                <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5">
-                  <TrendingDown className="h-5 w-5" />
-                </div>
-                <p className="text-sm font-semibold text-slate-800">
-                  Sem dados mensais para exibir
+                <TrendingDown className="h-6 w-6 text-slate-400 mb-2" />
+                <p className="text-sm font-semibold text-slate-700">Sem dados para o período</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Selecione outro intervalo ou importe extratos.
                 </p>
-                <p className="text-xs text-slate-500 max-w-xs mt-1 mb-4">
-                  Importe seus extratos para visualizar o comparativo mensal de Real vs. Orçado.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigate('/extratos')}
-                  className="text-xs border-slate-300"
-                >
-                  <UploadCloud className="mr-1.5 h-3.5 w-3.5" />
-                  Importar Extratos
-                </Button>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Donut Chart: Gastos por Categoria */}
-        <Card className="lg:col-span-5 border-slate-200 shadow-xs">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold text-slate-900">
-              Gastos por Categoria
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Distribuição percentual das despesas no período
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-2">
-            {donutChartData.length > 0 ? (
-              <div className="flex flex-col items-center">
-                <div className="h-[210px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={donutChartData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={55}
-                        outerRadius={85}
-                        paddingAngle={3}
-                      >
-                        {donutChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (!active || !payload || !payload.length) return null
-                          const data = payload[0].payload as {
-                            name: string
-                            value: number
-                            rawTotal: number
-                            percentage: number
-                            color: string
-                          }
-                          const avgRate =
-                            exchangeRates.length > 0
-                              ? exchangeRates.reduce((a, b) => a + Number(b.rate), 0) /
-                                exchangeRates.length
-                              : 6.0
-                          const formattedValue = formatCurrency(
-                            Number(data.value) * (currency === 'EUR' ? avgRate : 1),
-                            currency,
-                            avgRate,
-                          )
-
-                          return (
-                            <div className="bg-white border border-slate-200 rounded-lg shadow-md p-2.5 text-xs">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span
-                                  className="h-2.5 w-2.5 rounded-full shrink-0"
-                                  style={{ backgroundColor: data.color }}
-                                />
-                                <span className="font-semibold text-slate-900">{data.name}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3 text-slate-600">
-                                <span className="font-bold text-slate-900">{formattedValue}</span>
-                                <span className="text-slate-500 font-medium tabular-nums">
-                                  ({data.percentage.toFixed(1)}%)
-                                </span>
-                              </div>
-                            </div>
-                          )
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Custom Compact Legend */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 w-full mt-2 max-h-[120px] overflow-y-auto text-xs">
-                  {donutChartData.map((item) => (
-                    <div
-                      key={item.name}
-                      className="flex items-center justify-between text-slate-700"
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <span className="truncate max-w-[100px]">{item.name}</span>
-                      </div>
-                      <span className="font-semibold tabular-nums text-slate-900">
-                        {item.percentage.toFixed(1)}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
+        {/* Coluna Direita: Reserva Financeira + Saldo Disponível (1/3 = col-span-4) */}
+        <div className="lg:col-span-4 flex flex-col justify-between gap-5">
+          {/* Card: RESERVA FINANCEIRA */}
+          <Card className="border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow bg-white rounded-xl flex-1 flex flex-col justify-between">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 px-6">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                RESERVA FINANCEIRA
+              </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Scale className="h-4 w-4" />
               </div>
-            ) : (
-              <div className="flex flex-col h-[280px] items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-lg bg-slate-50/50">
-                <div className="h-10 w-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mb-2.5">
-                  <Layers className="h-5 w-5" />
-                </div>
-                <p className="text-sm font-semibold text-slate-800">Sem transações categorizadas</p>
-                <p className="text-xs text-slate-500 max-w-xs mt-1 mb-4">
-                  A rosca de categorias será preenchida conforme suas despesas forem importadas e
-                  classificadas.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigate('/categorias')}
-                  className="text-xs border-slate-300"
-                >
-                  Ver Categorias
-                </Button>
+            </CardHeader>
+            <CardContent className="px-6 pb-5 pt-0">
+              <div className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+                <CountUp value={bankMetrics.totalBalanceBrl} currency={currency} />
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <p className="text-xs text-slate-500 mt-1">
+                {bankMetrics.hasAccounts
+                  ? `${bankMetrics.monthsOfRunway.toFixed(1).replace('.', ',')}x a média mensal de gastos`
+                  : 'Cadastre suas contas em Configurações > Bancos'}
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Card: SALDO DISPONÍVEL */}
+          <Card className="border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow bg-white rounded-xl flex-1 flex flex-col justify-between">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 px-6">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                SALDO DISPONÍVEL
+              </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Scale className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent className="px-6 pb-5 pt-0">
+              <div className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+                <CountUp value={bankMetrics.totalBalanceBrl} currency={currency} />
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {bankMetrics.hasAccounts
+                  ? `Atualizado em ${formattedToday}`
+                  : 'Cadastre suas contas em Configurações > Bancos'}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {/* Recent Alerts Panel */}
-      <Card className="border-slate-200 shadow-xs">
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
+      {/* 5 & 6. SEÇÃO INFERIOR: AÇÕES & INSIGHTS (1/2) + DISTRIBUIÇÃO POR CATEGORIA (1/2) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Card Esquerdo: Ações & Insights do Agente Financeiro */}
+        <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl flex flex-col justify-between">
           <div>
-            <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-blue-600" />
-              Alertas e Estratégias Recentes
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Diagnósticos gerados automaticamente a partir dos dados do seu banco
-            </CardDescription>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/alertas')}
-            className="text-blue-600 hover:text-blue-700 text-xs font-semibold"
-          >
-            Ver todos ({alerts.length})
-            <ArrowRight className="ml-1 h-3.5 w-3.5" />
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {alerts.length > 0 ? (
-            <div className="space-y-3">
-              {alerts.slice(0, 3).map((alert, idx) => (
+            <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100">
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold text-slate-900">
+                    Ações & Insights do Agente Financeiro
+                  </CardTitle>
+                  <CardDescription className="text-xs text-slate-500 mt-0.5">
+                    Sugestões personalizadas baseadas na análise dos seus dados financeiros.
+                  </CardDescription>
+                </div>
+                <div className="h-7 w-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="px-6 py-4 space-y-3">
+              {agentInsights.slice(0, 6).map((insight) => (
                 <div
-                  key={alert.id || idx}
-                  className={`flex items-start gap-3 rounded-lg p-3.5 border text-sm transition-all ${
-                    alert.severity === 'critical'
-                      ? 'bg-red-50/70 border-red-200 text-red-950'
-                      : alert.severity === 'warning'
-                        ? 'bg-amber-50/70 border-amber-200 text-amber-950'
-                        : 'bg-blue-50/70 border-blue-200 text-blue-950'
-                  }`}
+                  key={insight.id}
+                  className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors flex items-start gap-3.5"
                 >
-                  <div className="shrink-0 mt-0.5">
-                    {alert.severity === 'critical' && (
-                      <ShieldAlert className="h-5 w-5 text-red-600" />
-                    )}
-                    {alert.severity === 'warning' && (
-                      <AlertTriangle className="h-5 w-5 text-amber-600" />
-                    )}
-                    {alert.severity === 'info' && <Info className="h-5 w-5 text-blue-600" />}
+                  <div className="p-2 rounded-lg bg-white border border-slate-200/60 shadow-2xs shrink-0 mt-0.5">
+                    {insight.icon}
                   </div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs uppercase tracking-wide">
-                        {alert.title}
-                      </span>
-                      <Badge
-                        variant="secondary"
-                        className={`text-[10px] uppercase font-bold px-1.5 py-0 ${
-                          alert.severity === 'critical'
-                            ? 'bg-red-200 text-red-800'
-                            : alert.severity === 'warning'
-                              ? 'bg-amber-200 text-amber-800'
-                              : 'bg-blue-200 text-blue-800'
-                        }`}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-semibold text-xs text-slate-900 truncate">
+                        {insight.title}
+                      </h4>
+                      <span
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${insight.badgeColor}`}
                       >
-                        {alert.severity === 'critical'
-                          ? 'Crítico'
-                          : alert.severity === 'warning'
-                            ? 'Atenção'
-                            : 'Insight'}
-                      </Badge>
+                        {insight.badgeText}
+                      </span>
                     </div>
-                    <p className="text-xs text-slate-700 leading-relaxed">{alert.description}</p>
-                    <div className="mt-1 pt-1 border-t border-black/5 text-xs font-medium text-slate-800">
-                      💡 <strong>Ação proposta:</strong> {alert.suggestion}
-                    </div>
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                      {insight.description}
+                    </p>
                   </div>
                 </div>
               ))}
-            </div>
-          ) : (
-            <div className="text-center py-6 text-xs text-slate-500">
-              Nenhum alerta ativo. Seus gastos estão em conformidade ou aguardando importação de
-              dados.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </div>
+
+          <div className="px-6 py-3.5 border-t border-slate-100 text-center">
+            <button
+              onClick={() => navigate('/categorias')}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+            >
+              Ver todas as categorias
+            </button>
+          </div>
+        </Card>
+
+        {/* Card Direito: Distribuição por Categoria (Barras horizontais estilizadas) */}
+        <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl flex flex-col justify-between">
+          <div>
+            <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100">
+              <CardTitle className="text-base font-bold text-slate-900">
+                Distribuição por Categoria
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-500 mt-0.5">
+                Principais ralos e destinos do seu dinheiro
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="px-6 py-4">
+              {categoryDistribution.items.length > 0 ? (
+                <div className="space-y-4">
+                  {categoryDistribution.items.slice(0, 11).map((cat) => (
+                    <div key={cat.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-slate-800 truncate pr-2">{cat.name}</span>
+                        <div className="tabular-nums shrink-0">
+                          <span className="font-bold text-slate-900">
+                            {formatCurrency(cat.total, currency)}
+                          </span>
+                          <span className="text-slate-400 font-normal ml-1">
+                            ({cat.percentage.toFixed(1).replace('.', ',')}%)
+                          </span>
+                        </div>
+                      </div>
+                      {/* Barra de progresso fina colorida */}
+                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(cat.percentage, 100)}%`,
+                            backgroundColor: cat.color || '#3B82F6',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-slate-400 text-xs">
+                  Nenhuma transação encontrada no período selecionado.
+                </div>
+              )}
+            </CardContent>
+          </div>
+
+          <div className="px-6 py-3.5 border-t border-slate-100 text-center">
+            <button
+              onClick={() => navigate('/categorias')}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+            >
+              Ver todas as categorias
+            </button>
+          </div>
+        </Card>
+      </div>
     </div>
   )
 }
