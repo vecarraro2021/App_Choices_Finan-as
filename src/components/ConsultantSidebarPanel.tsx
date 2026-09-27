@@ -215,7 +215,7 @@ export function ConsultantSidebarPanel({ userName, className = '' }: ConsultantS
 
   return (
     <div
-      className={`flex flex-col bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs transition-shadow w-full lg:w-[390px] shrink-0 ${className}`}
+      className={`flex flex-col bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs transition-shadow w-full lg:w-[350px] shrink-0 ${className}`}
       style={{ minWidth: 0 }}
     >
       {/* Título do painel */}

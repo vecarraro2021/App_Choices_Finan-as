@@ -406,7 +406,7 @@ export default function AlertsView() {
         </div>
       </div>
 
-      {/* Layout Principal: Conteúdo à Esquerda + Painel Lateral de Chat à Direita (390px em desktop) */}
+      {/* Layout Principal: Conteúdo à Esquerda + Painel Lateral de Chat à Direita (350px em desktop) */}
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         {/* Coluna de Conteúdo (Alertas, Métricas e Insights) */}
         <div className="flex-1 min-w-0 space-y-6 w-full">
@@ -595,8 +595,8 @@ export default function AlertsView() {
           </Card>
         </div>
 
-        {/* Coluna Direita: Painel Lateral do Consultor Financeiro (Desktop fixo 390px / empilhado em telas menores) */}
-        <div className="w-full lg:w-[390px] shrink-0">
+        {/* Coluna Direita: Painel Lateral do Consultor Financeiro (Desktop fixo 350px / empilhado em telas menores) */}
+        <div className="w-full lg:w-[350px] shrink-0">
           <div className="lg:sticky lg:top-20">
             <ConsultantSidebarPanel userName={user?.name || user?.email} />
           </div>
