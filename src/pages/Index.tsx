@@ -60,6 +60,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import {
   ResponsiveContainer,
   BarChart,
@@ -88,8 +90,10 @@ export default function Index() {
   const [alerts, setAlerts] = useState<Alert[]>([])
 
   // Date Filter State
-  const [startMonth, setStartMonth] = useState<string>('2026-01')
+  const [startMonth, setStartMonth] = useState<string>('2026-08')
   const [endMonth, setEndMonth] = useState<string>('2026-08')
+  const [isFullYear, setIsFullYear] = useState<boolean>(false)
+  const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
 
   // Load initial data
@@ -152,22 +156,45 @@ export default function Index() {
   useRealtime('categories', () => loadData())
   useRealtime('bank_accounts', () => loadData())
 
-  // Available months options (derived from transactions or 2026 default)
+  // Distinct months that actually contain data (transactions or incomes)
+  const monthsWithData = useMemo(() => {
+    const set = new Set<string>()
+    transactions.forEach((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
+    incomes.forEach((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
+    return Array.from(set).sort()
+  }, [transactions, incomes])
+
+  // Available months options for dropdown selectors (derived from data or 2026 default)
   const availableMonths = useMemo(() => {
     const set = new Set<string>()
     // Include all 2026 months by default
     for (let i = 1; i <= 12; i++) {
       set.add(`2026-${String(i).padStart(2, '0')}`)
     }
-    transactions.forEach((tx) => {
-      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-      if (m && m.length === 7) set.add(m)
-    })
-    incomes.forEach((inc) => {
-      if (inc.month && inc.month.length === 7) set.add(inc.month)
-    })
+    monthsWithData.forEach((m) => set.add(m))
     return Array.from(set).sort()
-  }, [transactions, incomes])
+  }, [monthsWithData])
+
+  // Initialize default filter to the most recent month with data upon loading
+  useEffect(() => {
+    if (!loading && !hasInitializedDefaultMonth) {
+      let latestMonth = '2026-08'
+      if (monthsWithData.length > 0) {
+        latestMonth = monthsWithData[monthsWithData.length - 1]
+      } else if (availableMonths.length > 0) {
+        latestMonth = availableMonths[availableMonths.length - 1]
+      }
+      setStartMonth(latestMonth)
+      setEndMonth(latestMonth)
+      setHasInitializedDefaultMonth(true)
+    }
+  }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
 
   // Helper format for month dropdown label (e.g. "Jan 2026")
   const formatMonthLabel = (mStr: string) => {
@@ -180,8 +207,52 @@ export default function Index() {
     return mStr
   }
 
-  // Filtered transactions & incomes based on startMonth and endMonth
+  // Filtered transactions & incomes based on startMonth, endMonth, and isFullYear
   const filteredData = useMemo(() => {
+    if (isFullYear) {
+      // Full year: all months with data or entire year interval
+      // Determine the reference year from data or current year (default 2026)
+      const refYear =
+        monthsWithData.length > 0
+          ? monthsWithData[0].split('-')[0]
+          : startMonth
+            ? startMonth.split('-')[0]
+            : '2026'
+
+      const startOfYear = `${refYear}-01`
+      const endOfYear = `${refYear}-12`
+
+      // If there are months with data, cover from earliest to latest data month,
+      // or the full 12 months of the year
+      const txs = transactions.filter((tx) => {
+        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
+      })
+
+      const incs = incomes.filter((inc) => {
+        const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
+      })
+
+      // Interval months for recurring incomes & calculations:
+      // If there are specific data months in the year, use all months in the year up to the latest or all 12
+      // Using all 12 months for "Ano completo"
+      const intervalMonths: string[] = []
+      for (let i = 1; i <= 12; i++) {
+        intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
+      }
+
+      return {
+        txs,
+        incs,
+        intervalMonths,
+        effectiveStart: startOfYear,
+        effectiveEnd: endOfYear,
+      }
+    }
+
     const s = startMonth <= endMonth ? startMonth : endMonth
     const e = startMonth <= endMonth ? endMonth : startMonth
 
@@ -218,7 +289,7 @@ export default function Index() {
       effectiveStart: s,
       effectiveEnd: e,
     }
-  }, [transactions, incomes, startMonth, endMonth])
+  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
 
   // Total Income (Entrada) for the period: Punctual Incomes + Recurring Incomes * months
   const totalIncome = useMemo(() => {
@@ -456,8 +527,17 @@ export default function Index() {
 
   // Filter button display text
   const filterLabel = useMemo(() => {
-    return `${formatMonthLabel(startMonth)} - ${formatMonthLabel(endMonth)}`
-  }, [startMonth, endMonth])
+    if (isFullYear) {
+      const year = startMonth ? startMonth.split('-')[0] : '2026'
+      return `Ano ${year} Completo`
+    }
+    if (startMonth === endMonth) {
+      return formatMonthLabel(startMonth)
+    }
+    const s = startMonth <= endMonth ? startMonth : endMonth
+    const e = startMonth <= endMonth ? endMonth : startMonth
+    return `${formatMonthLabel(s)} - ${formatMonthLabel(e)}`
+  }, [isFullYear, startMonth, endMonth])
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -494,14 +574,30 @@ export default function Index() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-600">Início</label>
+                    <label
+                      htmlFor="select-start-month"
+                      className={`text-xs font-semibold transition-colors ${
+                        isFullYear ? 'text-slate-400' : 'text-slate-600'
+                      }`}
+                    >
+                      Início
+                    </label>
                     <Select
                       value={startMonth}
+                      disabled={isFullYear}
                       onValueChange={(val) => {
                         setStartMonth(val)
                       }}
                     >
-                      <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
+                      <SelectTrigger
+                        id="select-start-month"
+                        disabled={isFullYear}
+                        className={`w-full text-xs h-9 border-slate-200 transition-opacity ${
+                          isFullYear
+                            ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60'
+                            : 'bg-slate-50 text-slate-800'
+                        }`}
+                      >
                         <SelectValue placeholder="Mês inicial" />
                       </SelectTrigger>
                       <SelectContent className="max-h-56">
@@ -515,14 +611,30 @@ export default function Index() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-600">Fim</label>
+                    <label
+                      htmlFor="select-end-month"
+                      className={`text-xs font-semibold transition-colors ${
+                        isFullYear ? 'text-slate-400' : 'text-slate-600'
+                      }`}
+                    >
+                      Fim
+                    </label>
                     <Select
                       value={endMonth}
+                      disabled={isFullYear}
                       onValueChange={(val) => {
                         setEndMonth(val)
                       }}
                     >
-                      <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
+                      <SelectTrigger
+                        id="select-end-month"
+                        disabled={isFullYear}
+                        className={`w-full text-xs h-9 border-slate-200 transition-opacity ${
+                          isFullYear
+                            ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60'
+                            : 'bg-slate-50 text-slate-800'
+                        }`}
+                      >
                         <SelectValue placeholder="Mês final" />
                       </SelectTrigger>
                       <SelectContent className="max-h-56">
@@ -536,32 +648,24 @@ export default function Index() {
                   </div>
                 </div>
 
-                {/* Predefinições Rápidas */}
-                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7 px-2 text-slate-600"
-                    onClick={() => {
-                      setStartMonth('2026-01')
-                      setEndMonth('2026-08')
-                      setIsFilterOpen(false)
+                {/* Toggle Ano Completo */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label
+                      htmlFor="toggle-full-year"
+                      className="text-xs font-semibold text-slate-700 cursor-pointer select-none"
+                    >
+                      Ano completo
+                    </Label>
+                    <p className="text-[11px] text-slate-400">Considerar todos os meses do ano</p>
+                  </div>
+                  <Switch
+                    id="toggle-full-year"
+                    checked={isFullYear}
+                    onCheckedChange={(checked) => {
+                      setIsFullYear(checked)
                     }}
-                  >
-                    Jan - Ago 2026
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7 px-2 text-slate-600"
-                    onClick={() => {
-                      setStartMonth('2026-01')
-                      setEndMonth('2026-12')
-                      setIsFilterOpen(false)
-                    }}
-                  >
-                    Ano 2026 Completo
-                  </Button>
+                  />
                 </div>
               </div>
             </PopoverContent>
