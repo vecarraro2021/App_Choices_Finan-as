@@ -48,8 +48,11 @@ import {
   Check,
   Target,
   Repeat,
+  Compass,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { getLatestDiagnostic } from '@/services/diagnosticService'
+import { DiagnosticRecord } from '@/types/finance'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -79,6 +82,7 @@ export default function Index() {
   const [monthlyTotals, setMonthlyTotals] = useState<MonthlyTotal[]>([])
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [latestDiagnostic, setLatestDiagnostic] = useState<DiagnosticRecord | null>(null)
 
   // Date Filter State
   const [startMonth, setStartMonth] = useState<string>('2026-08')
@@ -90,16 +94,18 @@ export default function Index() {
   // Load initial data
   const loadData = async () => {
     try {
-      const [txs, cats, incs, recIncs, mTotals, ratesList, settings, banks] = await Promise.all([
-        getAllTransactions(),
-        getCategories(),
-        getIncomes(),
-        getRecurringIncomes(),
-        getMonthlyTotals(),
-        getExchangeRates(),
-        getUserSettings(),
-        getBankAccounts(),
-      ])
+      const [txs, cats, incs, recIncs, mTotals, ratesList, settings, banks, diag] =
+        await Promise.all([
+          getAllTransactions(),
+          getCategories(),
+          getIncomes(),
+          getRecurringIncomes(),
+          getMonthlyTotals(),
+          getExchangeRates(),
+          getUserSettings(),
+          getBankAccounts(),
+          getLatestDiagnostic(user?.id),
+        ])
       setTransactions(txs)
       setCategories(cats)
       setIncomes(incs)
@@ -107,6 +113,7 @@ export default function Index() {
       setMonthlyTotals(mTotals)
       setExchangeRates(ratesList)
       setBankAccounts(banks)
+      setLatestDiagnostic(diag)
 
       // Compute and sync dynamic alerts
       const computed = await computeAndSyncAlerts(
@@ -146,6 +153,7 @@ export default function Index() {
   useRealtime('recurring_incomes', () => loadData())
   useRealtime('categories', () => loadData())
   useRealtime('bank_accounts', () => loadData())
+  useRealtime('diagnostics', () => loadData())
 
   // Distinct months that actually contain data (transactions or incomes)
   const monthsWithData = useMemo(() => {
@@ -510,7 +518,19 @@ export default function Index() {
       {/* 1. CABEÇALHO DA PÁGINA */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+            {latestDiagnostic && (
+              <button
+                onClick={() => navigate('/diagnostico')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                title="Ver sua Bússola Financeira"
+              >
+                <Compass className="h-3 w-3" />
+                <span>Bússola: {latestDiagnostic.overall_score}/100</span>
+              </button>
+            )}
+          </div>
           <p className="text-sm text-slate-500 mt-0.5">
             Visão resumida do seu planejamento financeiro
           </p>
@@ -539,6 +559,33 @@ export default function Index() {
           </Button>
         </div>
       </div>
+
+      {/* Convite para Diagnóstico caso o usuário ainda não o tenha feito */}
+      {!loading && !latestDiagnostic && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="h-10 w-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/20">
+              <Compass className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-white">
+                Descubra a saúde real das suas finanças com a Bússola Financeira
+              </h3>
+              <p className="text-xs text-blue-100 mt-0.5 max-w-2xl">
+                Responda ao questionário de 16 perguntas em 3 minutos para mapear seu controle
+                diário, reserva, metas e peso de dívidas.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => navigate('/diagnostico')}
+            className="bg-white text-blue-700 hover:bg-blue-50 font-semibold text-xs h-9 px-4 shrink-0 shadow-sm self-start sm:self-auto"
+          >
+            <span>Fazer Diagnóstico</span>
+            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+          </Button>
+        </div>
+      )}
 
       {/* 2. LINHA DE 3 CARDS DE MÉTRICA */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

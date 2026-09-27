@@ -27,6 +27,8 @@ import { generateFinancialInsights } from '@/lib/insightsEngine'
 import { calculateMonthlyDeficits } from '@/lib/alertsEngine'
 import { PeriodFilterPopover, formatPeriodMonthLabel } from '@/components/PeriodFilterPopover'
 import { ConsultantSidebarPanel } from '@/components/ConsultantSidebarPanel'
+import { getLatestDiagnostic } from '@/services/diagnosticService'
+import { DiagnosticRecord } from '@/types/finance'
 
 export default function AlertsView() {
   const { user, currency } = useAuth()
@@ -40,6 +42,7 @@ export default function AlertsView() {
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
+  const [latestDiagnostic, setLatestDiagnostic] = useState<DiagnosticRecord | null>(null)
 
   // Period Filter State (Same pattern as Dashboard & Receitas)
   const [startMonth, setStartMonth] = useState<string>('2026-08')
@@ -51,13 +54,14 @@ export default function AlertsView() {
   const loadData = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, settings, incs, recIncs, rates] = await Promise.all([
+      const [txs, cats, settings, incs, recIncs, rates, diag] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getUserSettings(),
         getIncomes(),
         getRecurringIncomes(),
         getExchangeRates(),
+        getLatestDiagnostic(user?.id),
       ])
 
       setTransactions(txs)
@@ -66,6 +70,7 @@ export default function AlertsView() {
       setIncomes(incs)
       setRecurringIncomes(recIncs)
       setExchangeRates(rates)
+      setLatestDiagnostic(diag)
     } catch (err) {
       console.error('Erro ao carregar dados de insights:', err)
       toast({
@@ -88,6 +93,7 @@ export default function AlertsView() {
   useRealtime('user_settings', () => loadData())
   useRealtime('income', () => loadData())
   useRealtime('recurring_incomes', () => loadData())
+  useRealtime('diagnostics', () => loadData())
 
   // Distinct months that actually contain data
   const monthsWithData = useMemo(() => {
@@ -350,9 +356,16 @@ export default function AlertsView() {
       part3 = Math.round(25 * withinRatio)
     }
 
-    const calculated = Math.min(100, Math.max(10, part1 + part2 + part3))
-    return calculated
-  }, [filteredData, recurringIncomes, periodDeficitMonths, categories, insights])
+    const calculatedObjective = Math.min(100, Math.max(10, part1 + part2 + part3))
+
+    // Se houver diagnóstico, combinar score objetivo (dados de transações) com score do diagnóstico (blend 50/50)
+    if (latestDiagnostic && typeof latestDiagnostic.overall_score === 'number') {
+      const blended = Math.round(0.5 * calculatedObjective + 0.5 * latestDiagnostic.overall_score)
+      return Math.min(100, Math.max(10, blended))
+    }
+
+    return calculatedObjective
+  }, [filteredData, recurringIncomes, periodDeficitMonths, categories, insights, latestDiagnostic])
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -441,6 +454,11 @@ export default function AlertsView() {
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   SAÚDE FINANCEIRA
                 </span>
+                {latestDiagnostic && (
+                  <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-full">
+                    Bússola v{latestDiagnostic.version}
+                  </span>
+                )}
               </CardHeader>
               <CardContent className="px-6 pb-5 pt-0 flex items-center justify-between">
                 <div>
@@ -450,7 +468,11 @@ export default function AlertsView() {
                     </span>
                     <span className="text-sm font-semibold text-slate-400">/100</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Score baseado no período</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {latestDiagnostic
+                      ? 'Score combinado (dados + Bússola)'
+                      : 'Score baseado no período'}
+                  </p>
                 </div>
 
                 {/* Donut / Anel de Progresso Azul */}

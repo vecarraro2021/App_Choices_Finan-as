@@ -36,7 +36,13 @@ import {
   AlertCircle,
   HelpCircle,
   ExternalLink,
+  Compass,
+  ArrowRight,
+  RotateCcw,
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { getLatestDiagnostic } from '@/services/diagnosticService'
+import { DiagnosticRecord } from '@/types/finance'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -145,9 +151,11 @@ function formatRelativeSync(dateStr?: string): string {
 export default function SettingsView() {
   const { user, updateProfile, changePassword } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'dados' | 'bancos' | 'notificacoes'>('bancos')
+  const [latestDiagnostic, setLatestDiagnostic] = useState<DiagnosticRecord | null>(null)
 
   // Bank Accounts State
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
@@ -222,7 +230,8 @@ export default function SettingsView() {
   useEffect(() => {
     loadBankAccounts()
     loadUserSettings()
-  }, [])
+    getLatestDiagnostic(user?.id).then((diag) => setLatestDiagnostic(diag))
+  }, [user?.id])
 
   useEffect(() => {
     if (user?.name) {
@@ -543,6 +552,106 @@ export default function SettingsView() {
 
         {/* ==================== ABA 1: MEUS DADOS ==================== */}
         <TabsContent value="dados" className="space-y-6 focus-visible:outline-hidden">
+          {/* Card Bússola Financeira: Diagnóstico de Saúde Financeira */}
+          <Card className="border-slate-200 shadow-xs bg-white overflow-hidden">
+            <CardHeader className="border-b border-slate-100 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <Compass className="h-4 w-4 text-blue-600" />
+                    Bússola Financeira (Diagnóstico de Saúde)
+                  </CardTitle>
+                  <CardDescription className="text-xs text-slate-500">
+                    Questionário de 16 perguntas que mapeia suas 5 dimensões financeiras.
+                  </CardDescription>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {latestDiagnostic ? (
+                    <Button
+                      onClick={() => navigate('/diagnostico')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-4 shadow-xs"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                      Refazer Diagnóstico
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() => navigate('/diagnostico')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-4 shadow-xs"
+                    >
+                      <Compass className="h-3.5 w-3.5 mr-1.5" />
+                      Fazer Diagnóstico
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-4 pb-5">
+              {latestDiagnostic ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        Versão {latestDiagnostic.version} ativa
+                      </span>
+                      <span className="text-xs text-slate-400">·</span>
+                      <span className="text-xs text-slate-500">
+                        {latestDiagnostic.created
+                          ? `Atualizado em ${new Date(latestDiagnostic.created).toLocaleDateString('pt-BR')}`
+                          : 'Preenchido'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 line-clamp-1 max-w-xl">
+                      {latestDiagnostic.summary || 'Resumo calculado nas 5 dimensões.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <span className="text-2xl font-black text-blue-600 tabular-nums">
+                        {latestDiagnostic.overall_score}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400">/100</span>
+                      <div className="text-[10px] text-slate-400 uppercase font-semibold">
+                        Score Geral
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/diagnostico')}
+                      className="text-xs border-slate-300"
+                    >
+                      Ver Detalhes
+                      <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-blue-900">
+                      Você ainda não preencheu sua Bússola Financeira.
+                    </p>
+                    <p className="text-xs text-blue-700">
+                      Descubra seu score nas 5 dimensões e turbine as recomendações do seu
+                      consultor.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => navigate('/diagnostico')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-8 px-3 shrink-0"
+                  >
+                    Responder Agora
+                    <ArrowRight className="h-3 w-3 ml-1" />
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Informações Pessoais */}
             <Card className="border-slate-200 shadow-xs bg-white">

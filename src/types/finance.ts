@@ -138,3 +138,19 @@ export interface UserSettings {
   created?: string
   updated?: string
 }
+
+export interface DiagnosticRecord {
+  id: string
+  owner: string
+  answers: Record<string, number>
+  score_controle: number
+  score_choques: number
+  score_metas: number
+  score_dividas: number
+  score_clareza: number
+  overall_score: number
+  summary: string
+  version: number
+  created?: string
+  updated?: string
+}

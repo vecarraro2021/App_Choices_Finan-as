@@ -9,7 +9,12 @@ interface AuthContextType {
   currency: Currency
   setCurrency: (c: Currency) => void
   login: (email: string, pass: string) => Promise<void>
-  register: (name: string, email: string, pass: string) => Promise<void>
+  register: (
+    name: string,
+    email: string,
+    pass: string,
+    diagnosticAnswers?: Record<number | string, number>,
+  ) => Promise<AuthModel>
   updateProfile: (data: { name?: string }) => Promise<void>
   changePassword: (
     oldPassword: string,
@@ -18,7 +23,6 @@ interface AuthContextType {
   ) => Promise<void>
   logout: () => void
 }
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -53,7 +57,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(pb.authStore.record)
   }
 
-  const register = async (name: string, email: string, pass: string) => {
+  const register = async (
+    name: string,
+    email: string,
+    pass: string,
+    diagnosticAnswers?: Record<number | string, number>,
+  ) => {
     await pb.collection('users').create({
       name,
       email,
@@ -64,6 +73,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await pb.collection('users').authWithPassword(email, pass)
     const newRecord = pb.authStore.record
     setUser(newRecord)
+
+    // Se respostas de diagnóstico foram passadas durante o cadastro, gravá-las
+    if (newRecord?.id && diagnosticAnswers && Object.keys(diagnosticAnswers).length > 0) {
+      try {
+        const { saveDiagnostic } = await import('@/services/diagnosticService')
+        await saveDiagnostic({
+          ownerId: newRecord.id,
+          answers: diagnosticAnswers,
+        })
+      } catch (diagErr) {
+        console.warn('Erro ao gravar diagnóstico no cadastro:', diagErr)
+      }
+    }
 
     // Garantir que a árvore inicial de categorias do usuário esteja provisionada
     if (newRecord?.id) {
@@ -221,6 +243,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('Bootstrap de categorias pós-registro:', err)
       }
     }
+
+    return newRecord!
   }
 
   const updateProfile = async (data: { name?: string }) => {

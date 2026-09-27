@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-27T02:40:49.343Z",
+  "generatedAt": "2026-09-27T16:33:45.198Z",
   "collections": [
     {
       "name": "users",
@@ -769,6 +769,98 @@
         }
       ],
       "indexes": ["CREATE UNIQUE INDEX idx_user_settings_owner ON user_settings (owner)"]
+    },
+    {
+      "name": "diagnostics",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && owner = @request.auth.id",
+        "view": "@request.auth.id != '' && owner = @request.auth.id",
+        "create": "@request.auth.id != '' && @request.body.owner = @request.auth.id",
+        "update": "@request.auth.id != '' && owner = @request.auth.id",
+        "delete": "@request.auth.id != '' && owner = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "answers",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "score_controle",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "score_choques",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "score_metas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "score_dividas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "score_clareza",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "overall_score",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "summary",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "version",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_diagnostics_owner ON diagnostics (owner)",
+        "CREATE INDEX idx_diagnostics_owner_version ON diagnostics (owner, version DESC)"
+      ]
     }
   ]
 }

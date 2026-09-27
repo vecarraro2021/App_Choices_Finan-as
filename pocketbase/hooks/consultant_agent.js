@@ -23,10 +23,37 @@ routerAdd(
         title: title,
       })
 
+      // Buscar diagnóstico mais recente do usuário para injetar no contexto da mensagem se relevante
+      let effectiveMessage = message
+      try {
+        const diagnostics = $app.findRecordsByFilter(
+          'diagnostics',
+          `owner = '${userId}'`,
+          '-version,-created',
+          1,
+          0,
+        )
+        if (diagnostics.length > 0) {
+          const latestDiag = diagnostics[0]
+          const summaryText = latestDiag.getString('summary')
+          const scoreGeral = latestDiag.getInt('overall_score')
+          const scoreControle = latestDiag.getInt('score_controle')
+          const scoreChoques = latestDiag.getInt('score_choques')
+          const scoreMetas = latestDiag.getInt('score_metas')
+          const scoreDividas = latestDiag.getInt('score_dividas')
+          const scoreClareza = latestDiag.getInt('score_clareza')
+
+          const diagContext = `[Contexto da Bússola Financeira do Usuário: Score Geral ${scoreGeral}/100. Dimensões: Controle=${scoreControle}, Choques/Reserva=${scoreChoques}, Metas=${scoreMetas}, Dívidas=${scoreDividas}, Clareza=${scoreClareza}. ${summaryText ? 'Resumo: ' + summaryText : ''}]\n\n`
+          effectiveMessage = diagContext + message
+        }
+      } catch (diagErr) {
+        // Silenciosamente prossegue se não encontrar ou se houver erro
+      }
+
       const iter = $ai.agent('consultor-financeiro').chat({
         user_id: userId,
         conversation_id: conv.id,
-        message: message,
+        message: effectiveMessage,
         stream: true,
       })
 

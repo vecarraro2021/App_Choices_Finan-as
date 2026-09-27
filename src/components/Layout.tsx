@@ -17,6 +17,7 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Compass,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -32,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 const navItems = [
   { path: '/', label: 'Visão Geral', icon: LayoutDashboard },
+  { path: '/diagnostico', label: 'Bússola Financeira', icon: Compass },
   { path: '/extratos', label: 'Extratos & Faturas', icon: FileSpreadsheet },
   { path: '/receitas', label: 'Receitas', icon: TrendingUp },
   { path: '/orcado-vs-realizado', label: 'Meu Orçamento', icon: Scale },
@@ -42,7 +44,11 @@ const navItems = [
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
 
-export default function Layout() {
+interface LayoutProps {
+  children?: React.ReactNode
+}
+
+export default function Layout({ children }: LayoutProps) {
   const { user, logout, currency, setCurrency } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -75,7 +81,7 @@ export default function Layout() {
   if (isAuthPage) {
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-        <Outlet />
+        {children || <Outlet />}
       </main>
     )
   }
@@ -331,6 +337,13 @@ export default function Layout() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
+                  onClick={() => navigate('/diagnostico')}
+                  className="cursor-pointer"
+                >
+                  <Compass className="mr-2 h-4 w-4" />
+                  Bússola Financeira
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={() => navigate('/categorias')}
                   className="cursor-pointer"
                 >
@@ -394,7 +407,7 @@ export default function Layout() {
               : 'flex-1 p-4 lg:p-8 overflow-y-auto'
           }
         >
-          <Outlet />
+          {children || <Outlet />}
         </main>
 
         {/* Simple Footer */}
