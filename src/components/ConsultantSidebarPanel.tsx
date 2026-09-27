@@ -25,10 +25,27 @@ interface ConsultantSidebarPanelProps {
   className?: string
 }
 
-const DEFAULT_QUESTIONS = [
-  'Gere um relatório deste mês?',
-  'Liste minhas oportunidade de economia.',
-  'Quais pontos mais críticos no último mês?',
+interface QuickQuestion {
+  label: string
+  prompt: string
+}
+
+const DEFAULT_QUESTIONS: QuickQuestion[] = [
+  {
+    label: 'Gere um relatório deste mês?',
+    prompt:
+      'Gere um relatório detalhado deste mês, resumindo receitas, despesas e principais categorias.',
+  },
+  {
+    label: 'Liste minhas oportunidade de economia.',
+    prompt:
+      'Liste minhas oportunidades de economia com base nas categorias com maiores gastos e desvios do orçamento.',
+  },
+  {
+    label: 'Quais os pontos mais críticos do último mês?',
+    prompt:
+      'Quais os pontos mais críticos do último mês? Mostre os meses com saldo negativo, o déficit de cada um, receitas vs despesas e uma sugestão prática.',
+  },
 ]
 
 export function ConsultantSidebarPanel({ userName, className = '' }: ConsultantSidebarPanelProps) {
@@ -280,10 +297,10 @@ export function ConsultantSidebarPanel({ userName, className = '' }: ConsultantS
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => handleSendMessage(q)}
+                    onClick={() => handleSendMessage(q.prompt)}
                     className="w-full text-left p-2.5 rounded-xl border border-slate-200/80 bg-white hover:bg-blue-50/50 hover:border-blue-200 text-xs text-slate-700 font-medium transition-colors leading-snug shadow-2xs flex items-center justify-between group"
                   >
-                    <span>{q}</span>
+                    <span>{q.label}</span>
                     <Sparkles className="h-3 w-3 text-slate-300 group-hover:text-blue-500 shrink-0 ml-1 transition-colors" />
                   </button>
                 ))}

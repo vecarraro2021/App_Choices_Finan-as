@@ -20,11 +20,31 @@ import {
 } from '@/services/consultantService'
 import type { DisplayMessage } from '@/lib/skipAi'
 
-const SUGGESTION_CHIPS = [
-  'Como está meu mês até agora?',
-  'Quais categorias mais pesaram este mês?',
-  'Crie um relatório do último mês',
-  'Tenho contas pendentes para pagar?',
+interface SuggestionChip {
+  label: string
+  prompt: string
+}
+
+const SUGGESTION_CHIPS: SuggestionChip[] = [
+  {
+    label: 'Como está meu mês até agora?',
+    prompt: 'Como está meu mês até agora? Analise gastos, receitas e o saldo parcial.',
+  },
+  {
+    label: 'Quais os pontos mais críticos do último mês?',
+    prompt:
+      'Quais os pontos mais críticos do último mês? Mostre os meses com saldo negativo, o déficit de cada um, receitas vs despesas e uma sugestão prática.',
+  },
+  {
+    label: 'Quais categorias mais pesaram este mês?',
+    prompt:
+      'Quais categorias mais pesaram este mês? Mostre as maiores despesas e se houve estouro do orçamento.',
+  },
+  {
+    label: 'Crie um relatório do último mês',
+    prompt:
+      'Crie um relatório completo do último mês com balanço de receitas, despesas e sugestões práticas.',
+  },
 ]
 
 export default function ConsultantView() {
@@ -223,8 +243,8 @@ export default function ConsultantView() {
     }
   }
 
-  const handleChipClick = (chipText: string) => {
-    handleSendMessage(chipText)
+  const handleChipClick = (chip: SuggestionChip) => {
+    handleSendMessage(chip.prompt)
   }
 
   return (
@@ -407,7 +427,7 @@ export default function ConsultantView() {
                     className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-200/90 bg-white hover:bg-slate-50/90 hover:border-blue-200 text-left text-xs sm:text-[13px] font-medium text-slate-700 shadow-2xs transition-all group"
                   >
                     <Sparkles className="h-4 w-4 text-emerald-500 shrink-0 group-hover:text-blue-600 transition-colors" />
-                    <span className="flex-1 leading-snug">{chip}</span>
+                    <span className="flex-1 leading-snug">{chip.label}</span>
                   </button>
                 ))}
               </div>

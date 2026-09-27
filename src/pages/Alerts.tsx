@@ -17,27 +17,14 @@ import {
   RecurringIncome,
   ExchangeRate,
 } from '@/types/finance'
-import {
-  formatCurrency,
-  formatMonthShort,
-  formatMonthLong,
-  MONTH_NAMES_SHORT,
-} from '@/lib/formatters'
-import {
-  RefreshCw,
-  AlertTriangle,
-  TrendingDown,
-  Lightbulb,
-  TrendingUp,
-  MessageSquareText,
-} from 'lucide-react'
+import { formatCurrency } from '@/lib/formatters'
+import { RefreshCw, Lightbulb, TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { InsightsList } from '@/components/InsightsList'
 import { generateFinancialInsights } from '@/lib/insightsEngine'
-import { calculateMonthlyDeficits, DeficitMonthItem } from '@/lib/alertsEngine'
+import { calculateMonthlyDeficits } from '@/lib/alertsEngine'
 import { PeriodFilterPopover, formatPeriodMonthLabel } from '@/components/PeriodFilterPopover'
 import { ConsultantSidebarPanel } from '@/components/ConsultantSidebarPanel'
 
@@ -494,75 +481,7 @@ export default function AlertsView() {
             </Card>
           </div>
 
-          {/* 3. Alerta de Saúde Financeira: Despesas excedem receitas com detalhamento por mês */}
-          {periodDeficitMonths.length > 0 && userSettings?.notify_monthly_summary !== false && (
-            <Card className="border-red-200 bg-red-50/50 shadow-xs rounded-xl overflow-hidden">
-              <CardHeader className="pb-3 pt-5 px-6 bg-red-100/40 border-b border-red-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 rounded-lg bg-red-100 text-red-700 shrink-0 mt-0.5">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-base font-bold text-red-900">
-                        Alerta de Saúde Financeira: Despesas excedem receitas
-                      </CardTitle>
-                      <Badge variant="destructive" className="text-[10px] font-semibold">
-                        Atenção
-                      </Badge>
-                    </div>
-                    <CardDescription className="text-xs text-red-700/90 mt-1">
-                      Foram identificados {periodDeficitMonths.length}{' '}
-                      {periodDeficitMonths.length === 1 ? 'mês' : 'meses'} no período selecionado
-                      onde o custo de vida superou a soma da renda recorrente + pontual declarada
-                      (déficit acumulado de{' '}
-                      <span className="font-bold">
-                        {formatCurrency(
-                          periodDeficitMonths.reduce((sum, d) => sum + d.deficit, 0),
-                          currency,
-                        )}
-                      </span>
-                      ).
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent className="px-6 py-4 space-y-3">
-                <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <TrendingDown className="h-4 w-4 text-red-600" />
-                  Detalhamento dos meses com saldo negativo no período:
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {periodDeficitMonths.map((item) => (
-                    <div
-                      key={item.month}
-                      className="p-3 bg-white rounded-lg border border-red-200/80 shadow-2xs space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-slate-900">
-                          {formatMonthLong(item.month)}
-                        </span>
-                        <span className="text-[11px] font-bold text-red-600 tabular-nums">
-                          - {formatCurrency(item.deficit, currency)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-                        <span>Receitas: {formatCurrency(item.income, currency)}</span>
-                        <span>Despesas: {formatCurrency(item.expense, currency)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-500 pt-1">
-                  Sugestão: Avalie despesas não recorrentes nos meses deficitários, otimize custos
-                  fixos ou incremente as fontes de receita para evitar consumo de reservas.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* 4. Card com a lista mantida e preservada de insights */}
+          {/* 3. Card com a lista mantida e preservada de insights */}
           <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl">
             <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100 flex flex-row items-center justify-between">
               <div>
