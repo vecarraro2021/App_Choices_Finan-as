@@ -409,7 +409,7 @@ export default function AlertsView() {
       {/* Grid Principal: Conteúdo à Esquerda (3 cols) + Painel Lateral de Chat à Direita (1 col em desktop) */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
         {/* Coluna de Conteúdo (Alertas, Métricas e Insights) */}
-        <div className="xl:col-span-3 space-y-6">
+        <div className="xl:col-span-3 space-y-6 min-w-0">
           {/* 2. Três Cards no Topo da Página conforme imagem de referência */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Card 1: INSIGHTS */}

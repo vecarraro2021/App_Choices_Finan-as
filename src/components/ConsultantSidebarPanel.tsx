@@ -215,7 +215,7 @@ export function ConsultantSidebarPanel({ userName, className = '' }: ConsultantS
 
   return (
     <div
-      className={`flex flex-col bg-transparent shrink-0 w-full ${className}`}
+      className={`flex flex-col bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs transition-shadow w-full shrink-0 ${className}`}
       style={{ minWidth: 0 }}
     >
       {/* Título do painel */}
@@ -247,7 +247,7 @@ export function ConsultantSidebarPanel({ userName, className = '' }: ConsultantS
       </div>
 
       {/* Área central com rolagem: ou Welcome State ou Conversa em andamento */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-0.5 max-h-[640px] lg:max-h-[calc(100vh-230px)]">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-0.5 max-h-[580px] lg:max-h-[calc(100vh-270px)]">
         {loadingMessages ? (
           <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
             <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
