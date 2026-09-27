@@ -406,10 +406,10 @@ export default function AlertsView() {
         </div>
       </div>
 
-      {/* Grid Principal: Conteúdo à Esquerda (3 cols) + Painel Lateral de Chat à Direita (1 col em desktop) */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+      {/* Layout Principal: Conteúdo à Esquerda + Painel Lateral de Chat à Direita (390px em desktop) */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
         {/* Coluna de Conteúdo (Alertas, Métricas e Insights) */}
-        <div className="xl:col-span-3 space-y-6 min-w-0">
+        <div className="flex-1 min-w-0 space-y-6 w-full">
           {/* 2. Três Cards no Topo da Página conforme imagem de referência */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Card 1: INSIGHTS */}
@@ -595,9 +595,9 @@ export default function AlertsView() {
           </Card>
         </div>
 
-        {/* Coluna Direita: Painel Lateral do Consultor Financeiro (Desktop fixo / empilhado em mobile) */}
-        <div className="xl:col-span-1">
-          <div className="xl:sticky xl:top-20">
+        {/* Coluna Direita: Painel Lateral do Consultor Financeiro (Desktop fixo 390px / empilhado em telas menores) */}
+        <div className="w-full lg:w-[390px] shrink-0">
+          <div className="lg:sticky lg:top-20">
             <ConsultantSidebarPanel userName={user?.name || user?.email} />
           </div>
         </div>
