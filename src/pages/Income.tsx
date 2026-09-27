@@ -16,9 +16,16 @@ import {
 } from '@/services/financeService'
 import { Income, RecurringIncome, Transaction, ExchangeRate } from '@/types/finance'
 import { calculateMonthlyDeficits } from '@/lib/alertsEngine'
-import { formatCurrency, formatPercent, formatMonthLong, formatMonthShort } from '@/lib/formatters'
+import {
+  formatCurrency,
+  formatPercent,
+  formatMonthLong,
+  formatMonthShort,
+  MONTH_NAMES_SHORT,
+} from '@/lib/formatters'
 import { parseAmount } from '@/lib/fileParser'
 import { useToast } from '@/hooks/use-toast'
+import { PeriodFilterPopover, formatPeriodMonthLabel } from '@/components/PeriodFilterPopover'
 import {
   TrendingUp,
   Plus,
@@ -56,6 +63,13 @@ export default function IncomeView() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Period Filter State
+  const [startMonth, setStartMonth] = useState<string>('2026-08')
+  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  const [isFullYear, setIsFullYear] = useState<boolean>(false)
+  const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
 
   // Add Punctual Income modal state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -112,9 +126,125 @@ export default function IncomeView() {
   useRealtime('recurring_incomes', () => loadData())
   useRealtime('transactions', () => loadData())
 
-  // Metrics calculation considering punctual + recurring
+  // Distinct months that actually contain data (transactions or incomes)
+  const monthsWithData = useMemo(() => {
+    const set = new Set<string>()
+    transactions.forEach((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
+    incomes.forEach((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
+    return Array.from(set).sort()
+  }, [transactions, incomes])
+
+  // Available months options for dropdown selectors
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (let i = 1; i <= 12; i++) {
+      set.add(`2026-${String(i).padStart(2, '0')}`)
+    }
+    monthsWithData.forEach((m) => set.add(m))
+    return Array.from(set).sort()
+  }, [monthsWithData])
+
+  // Initialize default filter to the most recent month with data upon loading
+  useEffect(() => {
+    if (!loading && !hasInitializedDefaultMonth) {
+      let latestMonth = '2026-08'
+      if (monthsWithData.length > 0) {
+        latestMonth = monthsWithData[monthsWithData.length - 1]
+      } else if (availableMonths.length > 0) {
+        latestMonth = availableMonths[availableMonths.length - 1]
+      }
+      setStartMonth(latestMonth)
+      setEndMonth(latestMonth)
+      setHasInitializedDefaultMonth(true)
+    }
+  }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
+
+  // Filtered transactions & incomes based on startMonth, endMonth, and isFullYear
+  const filteredData = useMemo(() => {
+    if (isFullYear) {
+      const refYear =
+        monthsWithData.length > 0
+          ? monthsWithData[0].split('-')[0]
+          : startMonth
+            ? startMonth.split('-')[0]
+            : '2026'
+
+      const startOfYear = `${refYear}-01`
+      const endOfYear = `${refYear}-12`
+
+      const txs = transactions.filter((tx) => {
+        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
+      })
+
+      const incs = incomes.filter((inc) => {
+        const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
+      })
+
+      const intervalMonths: string[] = []
+      for (let i = 1; i <= 12; i++) {
+        intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
+      }
+
+      return {
+        txs,
+        incs,
+        intervalMonths,
+        effectiveStart: startOfYear,
+        effectiveEnd: endOfYear,
+      }
+    }
+
+    const s = startMonth <= endMonth ? startMonth : endMonth
+    const e = startMonth <= endMonth ? endMonth : startMonth
+
+    const txs = transactions.filter((tx) => {
+      const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+      if (!m) return false
+      return m >= s && m <= e
+    })
+
+    const incs = incomes.filter((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (!m) return false
+      return m >= s && m <= e
+    })
+
+    const intervalMonths: string[] = []
+    let curr = s
+    while (curr <= e) {
+      intervalMonths.push(curr)
+      const [y, m] = curr.split('-').map(Number)
+      if (m === 12) {
+        curr = `${y + 1}-01`
+      } else {
+        curr = `${y}-${String(m + 1).padStart(2, '0')}`
+      }
+    }
+
+    return {
+      txs,
+      incs,
+      intervalMonths,
+      effectiveStart: s,
+      effectiveEnd: e,
+    }
+  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
+
+  // Metrics calculation considering punctual + recurring strictly for the selected period
   const metrics = useMemo(() => {
+    const { txs, incs, intervalMonths } = filteredData
     const activeRecurringList = recurringIncomes.filter((r) => r.active)
+
     const currentM = new Date().toISOString().slice(0, 7)
     const activeRecurringMonthlyBrl = activeRecurringList.reduce((acc, r) => {
       if (r.amount_brl) return acc + Number(r.amount_brl)
@@ -126,60 +256,39 @@ export default function IncomeView() {
       0,
     )
 
-    // Collect all relevant unique months
-    const uniqueMonths = new Set<string>()
-    incomes.forEach((i) => uniqueMonths.add(i.month))
-    transactions.forEach((t) => {
-      const m = t.month || (t.date ? t.date.slice(0, 7) : '')
-      if (m) uniqueMonths.add(m)
-    })
+    const monthsCount = intervalMonths.length > 0 ? intervalMonths.length : 1
 
-    // If there are no transactions or punctual incomes yet, at least 1 month reference
-    const monthsCount = Math.max(uniqueMonths.size, 1)
-
-    // Total punctual income in BRL (using month rate)
-    const totalPunctualBrl = incomes.reduce((acc, inc) => {
+    // Total punctual income in BRL for the period (using each income's month rate)
+    const totalPunctualBrl = incs.reduce((acc, inc) => {
       const rMonthRate = getRateForMonth(inc.month, exchangeRates)
       const valBrl = Number(inc.amount_brl) || (Number(inc.amount_eur) || 0) * rMonthRate
       return acc + valBrl
     }, 0)
 
-    // For recurring: calculate sum month by month according to each month's rate
+    // For recurring: calculate sum month by month according to each month's rate in intervalMonths
     let totalRecurringBrl = 0
-    if (uniqueMonths.size > 0) {
-      uniqueMonths.forEach((m) => {
-        const mRate = getRateForMonth(m, exchangeRates)
-        activeRecurringList.forEach((r) => {
-          totalRecurringBrl += Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate
-        })
+    intervalMonths.forEach((m) => {
+      const mRate = getRateForMonth(m, exchangeRates)
+      activeRecurringList.forEach((r) => {
+        totalRecurringBrl += Number(r.amount_brl) || (Number(r.amount_eur) || 0) * mRate
       })
-    } else {
-      totalRecurringBrl = activeRecurringMonthlyBrl * monthsCount
-    }
+    })
 
     const totalIncome = totalPunctualBrl + totalRecurringBrl
 
-    // Total expenses in BRL (each transaction uses its month's rate)
-    const totalExpenses = transactions.reduce((acc, tx) => {
-      const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-      const txRate = getRateForMonth(txMonth, exchangeRates)
-      // tx.amount is converted with txRate if currency format / or stored in BRL
+    // Total expenses in BRL for the period
+    const totalExpenses = txs.reduce((acc, tx) => {
       return acc + (Number(tx.amount) || 0)
     }, 0)
 
-    // Average monthly income = total / months
+    // Average monthly income = total / months in interval
     const avgMonthlyIncome = totalIncome / monthsCount
 
     // Savings rate = (income - expenses) / income
     const savingsRate = totalIncome > 0 ? (totalIncome - totalExpenses) / totalIncome : 0
 
-    // Monthly deficit check using shared helper
-    const deficitMonths = calculateMonthlyDeficits(
-      transactions,
-      incomes,
-      recurringIncomes,
-      exchangeRates,
-    )
+    // Monthly deficit check restricted to period transactions and punctual incomes
+    const deficitMonths = calculateMonthlyDeficits(txs, incs, recurringIncomes, exchangeRates)
 
     return {
       activeRecurringMonthlyBrl,
@@ -191,7 +300,7 @@ export default function IncomeView() {
       deficitMonths,
       monthsCount,
     }
-  }, [incomes, recurringIncomes, transactions, exchangeRates])
+  }, [filteredData, recurringIncomes, exchangeRates])
 
   // Handle Add Punctual Income
   const handleSaveIncome = async (e: React.FormEvent) => {
@@ -377,17 +486,29 @@ export default function IncomeView() {
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receitas</h1>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Adicione suas receitias recorrentes ou entradas pontuais
+          <p className="text-sm text-slate-500 mt-0.5">
+            Adicione suas receitas recorrentes ou entradas pontuais
           </p>
         </div>
 
-        <div className="flex items-center gap-2"></div>
+        <div className="flex items-center gap-3">
+          <PeriodFilterPopover
+            startMonth={startMonth}
+            endMonth={endMonth}
+            isFullYear={isFullYear}
+            onStartMonthChange={setStartMonth}
+            onEndMonthChange={setEndMonth}
+            onFullYearChange={setIsFullYear}
+            availableMonths={availableMonths}
+            isOpen={isFilterOpen}
+            onOpenChange={setIsFilterOpen}
+          />
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -429,7 +550,9 @@ export default function IncomeView() {
               {formatCurrency(metrics.totalIncome, currency)}
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Recorrentes acumuladas + entradas pontuais
+              {metrics.monthsCount === 1
+                ? '1 mês analisado'
+                : `${metrics.monthsCount} meses analisados`}
             </p>
           </CardContent>
         </Card>
@@ -438,7 +561,7 @@ export default function IncomeView() {
         <Card className="border-slate-200 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Média Mensal Global
+              Média Mensal do Período
             </CardTitle>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
               <Calendar className="h-4 w-4" />
@@ -599,16 +722,19 @@ export default function IncomeView() {
         </CardContent>
       </Card>
 
-      {/* SECTION 2: PUNCTUAL INCOMES TABLE */}
+      {/* SECTION 2: PUNCTUAL INCOMES TABLE (FILTRADA PELO PERÍODO) */}
       <Card className="border-slate-200 shadow-xs overflow-hidden">
         <CardHeader className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle className="text-base font-bold text-slate-900">
-              Entradas Pontuais & Variáveis ({incomes.length})
+              Entradas Pontuais & Variáveis no Período ({filteredData.incs.length})
             </CardTitle>
             <CardDescription className="text-xs">
-              Lançamentos específicos por mês (ex: 13º salário, bônus, dividendos, consultorias
-              pontuais)
+              Lançamentos específicos filtrados pelo período selecionado (
+              {isFullYear
+                ? 'Ano completo'
+                : `${formatPeriodMonthLabel(filteredData.effectiveStart)} até ${formatPeriodMonthLabel(filteredData.effectiveEnd)}`}
+              )
             </CardDescription>
           </div>
 
@@ -626,15 +752,15 @@ export default function IncomeView() {
         <CardContent className="p-0">
           {loading ? (
             <div className="py-12 text-center text-xs text-slate-400">Carregando receitas...</div>
-          ) : incomes.length === 0 ? (
+          ) : filteredData.incs.length === 0 ? (
             <div className="py-12 text-center">
               <Wallet className="h-8 w-8 text-slate-300 mx-auto mb-2" />
               <p className="text-xs font-semibold text-slate-700">
-                Nenhuma entrada pontual lançada
+                Nenhuma entrada pontual encontrada no período selecionado
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm mx-auto">
-                Suas receitas recorrentes ativas já garantem a cobertura mensal automática. Use esta
-                seção caso receba bonificações ou rendas extras em meses específicos.
+                Suas receitas recorrentes continuam ativas para todos os meses do intervalo. Ajuste
+                o filtro ou adicione entradas pontuais específicas.
               </p>
             </div>
           ) : (
@@ -651,7 +777,7 @@ export default function IncomeView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {incomes.map((inc) => (
+                  {filteredData.incs.map((inc) => (
                     <tr key={inc.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
                         {formatMonthLong(inc.month)}

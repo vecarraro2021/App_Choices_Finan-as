@@ -1,23 +1,37 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/hooks/use-realtime'
-import { getAllTransactions, getCategories, getUserSettings } from '@/services/financeService'
-import { Category, Transaction, UserSettings } from '@/types/finance'
-import { formatMonthShort, MONTH_NAMES_SHORT } from '@/lib/formatters'
-import { Calendar as CalendarIcon, RefreshCw, ChevronDown } from 'lucide-react'
+import {
+  getAllTransactions,
+  getCategories,
+  getUserSettings,
+  getIncomes,
+  getRecurringIncomes,
+  getExchangeRates,
+} from '@/services/financeService'
+import {
+  Category,
+  Transaction,
+  UserSettings,
+  Income,
+  RecurringIncome,
+  ExchangeRate,
+} from '@/types/finance'
+import {
+  formatCurrency,
+  formatMonthShort,
+  formatMonthLong,
+  MONTH_NAMES_SHORT,
+} from '@/lib/formatters'
+import { RefreshCw, AlertTriangle, TrendingDown } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { InsightsList } from '@/components/InsightsList'
 import { generateFinancialInsights } from '@/lib/insightsEngine'
+import { calculateMonthlyDeficits, DeficitMonthItem } from '@/lib/alertsEngine'
+import { PeriodFilterPopover, formatPeriodMonthLabel } from '@/components/PeriodFilterPopover'
 
 export default function AlertsView() {
   const { user, currency } = useAuth()
@@ -27,24 +41,36 @@ export default function AlertsView() {
   const [refreshing, setRefreshing] = useState(false)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [incomes, setIncomes] = useState<Income[]>([])
+  const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
 
-  // Filter state: 'all' for all months consolidated, or specific month string 'YYYY-MM'
-  const [selectedMonth, setSelectedMonth] = useState<string>('all')
+  // Period Filter State (Same pattern as Dashboard & Receitas)
+  const [startMonth, setStartMonth] = useState<string>('2026-08')
+  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  const [isFullYear, setIsFullYear] = useState<boolean>(false)
+  const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
 
   const loadData = async () => {
     try {
       setRefreshing(true)
-      const [txs, cats, settings] = await Promise.all([
+      const [txs, cats, settings, incs, recIncs, rates] = await Promise.all([
         getAllTransactions(),
         getCategories(),
         getUserSettings(),
+        getIncomes(),
+        getRecurringIncomes(),
+        getExchangeRates(),
       ])
 
       setTransactions(txs)
       setCategories(cats)
       setUserSettings(settings)
+      setIncomes(incs)
+      setRecurringIncomes(recIncs)
+      setExchangeRates(rates)
     } catch (err) {
       console.error('Erro ao carregar dados de insights:', err)
       toast({
@@ -65,89 +91,167 @@ export default function AlertsView() {
   useRealtime('transactions', () => loadData())
   useRealtime('categories', () => loadData())
   useRealtime('user_settings', () => loadData())
+  useRealtime('income', () => loadData())
+  useRealtime('recurring_incomes', () => loadData())
 
-  // Available months options (derived from transactions or 2026 default, same as Dashboard)
-  const availableMonths = useMemo(() => {
+  // Distinct months that actually contain data
+  const monthsWithData = useMemo(() => {
     const set = new Set<string>()
-    // Include 2026 months by default
-    for (let i = 1; i <= 12; i++) {
-      set.add(`2026-${String(i).padStart(2, '0')}`)
-    }
     transactions.forEach((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
       if (m && m.length === 7) set.add(m)
     })
+    incomes.forEach((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (m && m.length === 7) set.add(m)
+    })
     return Array.from(set).sort()
-  }, [transactions])
+  }, [transactions, incomes])
 
-  // Helper format for month dropdown label (e.g. "Jan 2026")
-  const formatMonthLabel = (mStr: string) => {
-    if (!mStr || !mStr.includes('-')) return mStr
-    const [year, month] = mStr.split('-')
-    const idx = parseInt(month, 10) - 1
-    if (idx >= 0 && idx < 12) {
-      return `${MONTH_NAMES_SHORT[idx]} ${year}`
+  // Available months options for dropdown selectors
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (let i = 1; i <= 12; i++) {
+      set.add(`2026-${String(i).padStart(2, '0')}`)
     }
-    return mStr
-  }
+    monthsWithData.forEach((m) => set.add(m))
+    return Array.from(set).sort()
+  }, [monthsWithData])
 
-  // Label for trigger button
-  const filterTriggerLabel = useMemo(() => {
-    if (selectedMonth === 'all') {
-      return 'Todos os meses'
+  // Initialize default filter to the most recent month with data upon loading
+  useEffect(() => {
+    if (!loading && !hasInitializedDefaultMonth) {
+      let latestMonth = '2026-08'
+      if (monthsWithData.length > 0) {
+        latestMonth = monthsWithData[monthsWithData.length - 1]
+      } else if (availableMonths.length > 0) {
+        latestMonth = availableMonths[availableMonths.length - 1]
+      }
+      setStartMonth(latestMonth)
+      setEndMonth(latestMonth)
+      setHasInitializedDefaultMonth(true)
     }
-    return formatMonthLabel(selectedMonth)
-  }, [selectedMonth])
+  }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
 
-  // Compute filtered transactions and intervalMonths
+  // Compute filtered transactions and intervalMonths based on selected period
   const filteredData = useMemo(() => {
-    if (selectedMonth === 'all') {
-      // Find all distinct months with data, or fallback to full 2026
-      const set = new Set<string>()
-      transactions.forEach((tx) => {
+    if (isFullYear) {
+      const refYear =
+        monthsWithData.length > 0
+          ? monthsWithData[0].split('-')[0]
+          : startMonth
+            ? startMonth.split('-')[0]
+            : '2026'
+
+      const startOfYear = `${refYear}-01`
+      const endOfYear = `${refYear}-12`
+
+      const txs = transactions.filter((tx) => {
         const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-        if (m && m.length === 7) set.add(m)
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
       })
-      const distinct = Array.from(set).sort()
-      const interval = distinct.length > 0 ? distinct : availableMonths
+
+      const incs = incomes.filter((inc) => {
+        const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+        if (!m) return false
+        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
+      })
+
+      const intervalMonths: string[] = []
+      for (let i = 1; i <= 12; i++) {
+        intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
+      }
+
       return {
-        txs: transactions,
-        intervalMonths: interval,
+        txs,
+        incs,
+        intervalMonths,
+        effectiveStart: startOfYear,
+        effectiveEnd: endOfYear,
       }
     }
 
+    const s = startMonth <= endMonth ? startMonth : endMonth
+    const e = startMonth <= endMonth ? endMonth : startMonth
+
     const txs = transactions.filter((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-      return m === selectedMonth
+      if (!m) return false
+      return m >= s && m <= e
     })
+
+    const incs = incomes.filter((inc) => {
+      const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
+      if (!m) return false
+      return m >= s && m <= e
+    })
+
+    const intervalMonths: string[] = []
+    let curr = s
+    while (curr <= e) {
+      intervalMonths.push(curr)
+      const [y, m] = curr.split('-').map(Number)
+      if (m === 12) {
+        curr = `${y + 1}-01`
+      } else {
+        curr = `${y}-${String(m + 1).padStart(2, '0')}`
+      }
+    }
 
     return {
       txs,
-      intervalMonths: [selectedMonth],
+      incs,
+      intervalMonths,
+      effectiveStart: s,
+      effectiveEnd: e,
     }
-  }, [selectedMonth, transactions, availableMonths])
+  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
 
-  // Generate insights using shared engine
+  // Calculate monthly average spending for the period
+  const periodMonthlyAverage = useMemo(() => {
+    const totalSpent = filteredData.txs.reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+    const count = Math.max(filteredData.intervalMonths.length, 1)
+    return totalSpent / count
+  }, [filteredData])
+
+  // Calculate deficits strictly for the selected period
+  const periodDeficitMonths = useMemo(() => {
+    if (userSettings?.notify_monthly_summary === false) {
+      return []
+    }
+    return calculateMonthlyDeficits(
+      filteredData.txs,
+      filteredData.incs,
+      recurringIncomes,
+      exchangeRates,
+    )
+  }, [filteredData, recurringIncomes, exchangeRates, userSettings])
+
+  // Generate insights using shared engine over the selected period
   const insights = useMemo(() => {
     return generateFinancialInsights({
       transactions: filteredData.txs,
       categories,
       currency,
       intervalMonths: filteredData.intervalMonths,
+      monthlyAverage: periodMonthlyAverage,
       userSettings,
     })
-  }, [filteredData, categories, currency, userSettings])
+  }, [filteredData, categories, currency, periodMonthlyAverage, userSettings])
 
-  // Quick stats from generated insights
+  // Quick stats from generated insights + deficit alert
   const stats = useMemo(() => {
+    const hasDeficitAlert = periodDeficitMonths.length > 0
     return {
-      critical: insights.filter((i) => i.badgeText === 'Atenção').length,
+      critical:
+        insights.filter((i) => i.badgeText === 'Atenção').length + (hasDeficitAlert ? 1 : 0),
       economy: insights.filter((i) => i.badgeText === 'Economia').length,
       success: insights.filter((i) => i.badgeText === 'No caminho').length,
       priority: insights.filter((i) => i.badgeText === 'Alta prioridade').length,
-      total: insights.length,
+      total: insights.length + (hasDeficitAlert ? 1 : 0),
     }
-  }, [insights])
+  }, [insights, periodDeficitMonths])
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -161,87 +265,17 @@ export default function AlertsView() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Dropdown de filtro por mês com ícone de calendário */}
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className="bg-white border-slate-200 hover:bg-slate-50 text-slate-700 font-medium shadow-xs h-10 px-3.5 gap-2"
-              >
-                <CalendarIcon className="h-4 w-4 text-slate-500" />
-                <span className="text-xs sm:text-sm">{filterTriggerLabel}</span>
-                <ChevronDown className="h-4 w-4 text-slate-400" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-4 bg-white border-slate-200 shadow-lg">
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <h4 className="font-semibold text-sm text-slate-900">Filtrar por Mês</h4>
-                  <p className="text-xs text-slate-500">
-                    Selecione um mês específico ou veja o consolidado de todos os meses.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-600">Período</label>
-                  <Select
-                    value={selectedMonth}
-                    onValueChange={(val) => {
-                      setSelectedMonth(val)
-                      setIsFilterOpen(false)
-                    }}
-                  >
-                    <SelectTrigger className="w-full text-xs h-9 bg-slate-50 border-slate-200">
-                      <SelectValue placeholder="Selecione o mês" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-56">
-                      <SelectItem value="all" className="text-xs font-medium">
-                        Todos os meses (Período completo)
-                      </SelectItem>
-                      {availableMonths.map((m) => (
-                        <SelectItem key={`filter-${m}`} value={m} className="text-xs">
-                          {formatMonthLabel(m)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Predefinições Rápidas */}
-                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7 px-2 text-slate-600"
-                    onClick={() => {
-                      setSelectedMonth('all')
-                      setIsFilterOpen(false)
-                    }}
-                  >
-                    Todos os meses
-                  </Button>
-                  {availableMonths.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs h-7 px-2 text-slate-600"
-                      onClick={() => {
-                        // Select current/latest month
-                        const current = new Date().toISOString().slice(0, 7)
-                        const target = availableMonths.includes(current)
-                          ? current
-                          : availableMonths[availableMonths.length - 1]
-                        setSelectedMonth(target)
-                        setIsFilterOpen(false)
-                      }}
-                    >
-                      Mês atual
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <PeriodFilterPopover
+            startMonth={startMonth}
+            endMonth={endMonth}
+            isFullYear={isFullYear}
+            onStartMonthChange={setStartMonth}
+            onEndMonthChange={setEndMonth}
+            onFullYearChange={setIsFullYear}
+            availableMonths={availableMonths}
+            isOpen={isFilterOpen}
+            onOpenChange={setIsFilterOpen}
+          />
 
           <Button
             onClick={loadData}
@@ -308,7 +342,75 @@ export default function AlertsView() {
         </Card>
       </div>
 
-      {/* 3. Card com a lista compartilhada de insights */}
+      {/* 3. Alerta de Saúde Financeira: Despesas excedem receitas com detalhamento por mês (restrito ao período) */}
+      {periodDeficitMonths.length > 0 && userSettings?.notify_monthly_summary !== false && (
+        <Card className="border-red-200 bg-red-50/50 shadow-xs rounded-xl overflow-hidden">
+          <CardHeader className="pb-3 pt-5 px-6 bg-red-100/40 border-b border-red-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-red-100 text-red-700 shrink-0 mt-0.5">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <CardTitle className="text-base font-bold text-red-900">
+                    Alerta de Saúde Financeira: Despesas excedem receitas
+                  </CardTitle>
+                  <Badge variant="destructive" className="text-[10px] font-semibold">
+                    Atenção
+                  </Badge>
+                </div>
+                <CardDescription className="text-xs text-red-700/90 mt-1">
+                  Foram identificados {periodDeficitMonths.length}{' '}
+                  {periodDeficitMonths.length === 1 ? 'mês' : 'meses'} no período selecionado onde o
+                  custo de vida superou a soma da renda recorrente + pontual declarada (déficit
+                  acumulado de{' '}
+                  <span className="font-bold">
+                    {formatCurrency(
+                      periodDeficitMonths.reduce((sum, d) => sum + d.deficit, 0),
+                      currency,
+                    )}
+                  </span>
+                  ).
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="px-6 py-4 space-y-3">
+            <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <TrendingDown className="h-4 w-4 text-red-600" />
+              Detalhamento dos meses com saldo negativo no período:
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {periodDeficitMonths.map((item) => (
+                <div
+                  key={item.month}
+                  className="p-3 bg-white rounded-lg border border-red-200/80 shadow-2xs space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900">
+                      {formatMonthLong(item.month)}
+                    </span>
+                    <span className="text-[11px] font-bold text-red-600 tabular-nums">
+                      - {formatCurrency(item.deficit, currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                    <span>Receitas: {formatCurrency(item.income, currency)}</span>
+                    <span>Despesas: {formatCurrency(item.expense, currency)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 pt-1">
+              Sugestão: Avalie despesas não recorrentes nos meses deficitários, otimize custos fixos
+              ou incremente as fontes de receita para evitar consumo de reservas.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 4. Card com a lista compartilhada de insights */}
       <Card className="border-slate-200/80 shadow-xs bg-white rounded-xl">
         <CardHeader className="pb-3 pt-5 px-6 border-b border-slate-100 flex flex-row items-center justify-between">
           <div>
@@ -316,9 +418,11 @@ export default function AlertsView() {
               Insights & Recomendações
             </CardTitle>
             <CardDescription className="text-xs text-slate-500 mt-0.5">
-              {selectedMonth === 'all'
-                ? 'Sugestões consolidadas calculadas sobre todo o período disponível.'
-                : `Sugestões calculadas exclusivamente para ${formatMonthLabel(selectedMonth)}.`}
+              {isFullYear
+                ? 'Sugestões consolidadas calculadas sobre todo o ano selecionado.'
+                : filteredData.effectiveStart === filteredData.effectiveEnd
+                  ? `Sugestões calculadas exclusivamente para ${formatPeriodMonthLabel(filteredData.effectiveStart)}.`
+                  : `Sugestões calculadas para o intervalo de ${formatPeriodMonthLabel(filteredData.effectiveStart)} até ${formatPeriodMonthLabel(filteredData.effectiveEnd)}.`}
             </CardDescription>
           </div>
           <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
@@ -330,9 +434,9 @@ export default function AlertsView() {
           <InsightsList
             insights={insights}
             emptyMessage={
-              selectedMonth === 'all'
-                ? 'Nenhum insight identificado para o período completo.'
-                : `Nenhum desvio ou insight identificado para ${formatMonthLabel(selectedMonth)}.`
+              isFullYear
+                ? 'Nenhum insight identificado para o ano completo.'
+                : `Nenhum desvio ou insight identificado para o período selecionado.`
             }
           />
         </CardContent>
