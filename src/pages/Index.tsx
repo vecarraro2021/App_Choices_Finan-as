@@ -37,6 +37,7 @@ import {
   AlertTriangle,
   UploadCloud,
   ArrowRight,
+  ArrowDownRight,
   ShieldAlert,
   Info,
   Calendar as CalendarIcon,
@@ -617,8 +618,8 @@ export default function Index() {
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
               TOTAL SAÍDA
             </span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-              <Scale className="h-4 w-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+              <ArrowDownRight className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent className="px-6 pb-5 pt-0">
