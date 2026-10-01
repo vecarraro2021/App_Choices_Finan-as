@@ -3,18 +3,14 @@
  * Processamento 100% client-side sem envio de dados a serviços externos.
  */
 import * as pdfjsLib from 'pdfjs-dist'
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 // Configuração do worker do pdf.js
-// O worker do pdfjs-dist pode ser carregado via URL do pacote ou unpkg com fallback
+// No Vite, o sufixo ?url garante que o asset seja emitido na pasta de assets
+// e retorne a URL pública correta em tempo de build e desenvolvimento.
 if (typeof window !== 'undefined') {
-  try {
-    // Tenta carregar o worker local empacotado via Vite
-    const workerUrl = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-  } catch {
-    // Fallback para CDN oficial do unpkg correspondente à versão do pdfjs-dist
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    workerUrl || `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 }
 
 export interface PDFPageText {
