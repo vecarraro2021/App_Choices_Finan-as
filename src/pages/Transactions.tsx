@@ -43,8 +43,10 @@ import {
   ArrowRight,
   Sparkles,
   Loader2,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -100,6 +102,10 @@ export default function TransactionsView() {
   const [filterMonth, setFilterMonth] = useState<string>(initialMonth)
   const [filterCategory, setFilterCategory] = useState<string>(initialCat)
   const [searchQuery, setSearchQuery] = useState('')
+
+  // Multi-selection state
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false)
 
   // Upload & Mapping state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -176,6 +182,11 @@ export default function TransactionsView() {
 
   useEffect(() => {
     loadTransactionsList()
+  }, [page, filterMonth, filterCategory, searchQuery])
+
+  // Clear selection whenever filters or pagination changes so unviewed/filtered items are unselected
+  useEffect(() => {
+    setSelectedTxIds([])
   }, [page, filterMonth, filterCategory, searchQuery])
 
   useRealtime('transactions', () => loadTransactionsList())
@@ -648,11 +659,78 @@ export default function TransactionsView() {
     if (!confirm('Deseja realmente excluir este lançamento?')) return
     try {
       await deleteTransaction(id)
+      setSelectedTxIds((prev) => prev.filter((item) => item !== id))
       toast({ title: 'Lançamento excluído com sucesso.' })
       loadTransactionsList()
     } catch (err) {
       console.error(err)
       toast({ title: 'Erro ao excluir lançamento', variant: 'destructive' })
+    }
+  }
+
+  // Batch selection handlers
+  const visibleTxIds = useMemo(() => transactions.map((t) => t.id), [transactions])
+
+  const areAllVisibleSelected = useMemo(() => {
+    if (visibleTxIds.length === 0) return false
+    return visibleTxIds.every((id) => selectedTxIds.includes(id))
+  }, [visibleTxIds, selectedTxIds])
+
+  const isSomeVisibleSelected = useMemo(() => {
+    return visibleTxIds.some((id) => selectedTxIds.includes(id)) && !areAllVisibleSelected
+  }, [visibleTxIds, selectedTxIds, areAllVisibleSelected])
+
+  const handleToggleSelectAll = () => {
+    if (areAllVisibleSelected) {
+      // Unselect all visible
+      setSelectedTxIds((prev) => prev.filter((id) => !visibleTxIds.includes(id)))
+    } else {
+      // Select all visible
+      setSelectedTxIds((prev) => Array.from(new Set([...prev, ...visibleTxIds])))
+    }
+  }
+
+  const handleToggleSelectTx = (id: string) => {
+    setSelectedTxIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    )
+  }
+
+  const handleClearSelection = () => {
+    setSelectedTxIds([])
+  }
+
+  const handleDeleteBatch = async () => {
+    if (selectedTxIds.length === 0) return
+    const count = selectedTxIds.length
+    const message =
+      count === 1
+        ? 'Deseja realmente excluir o lançamento selecionado?'
+        : `Deseja realmente excluir os ${count} lançamentos selecionados?`
+
+    if (!confirm(message)) return
+
+    try {
+      setIsDeletingBatch(true)
+      await Promise.all(selectedTxIds.map((id) => deleteTransaction(id)))
+      toast({
+        title:
+          count === 1
+            ? 'Lançamento excluído com sucesso.'
+            : `${count} lançamentos excluídos com sucesso.`,
+      })
+      setSelectedTxIds([])
+      loadTransactionsList()
+    } catch (err) {
+      console.error('Erro na exclusão em lote:', err)
+      toast({
+        title: 'Erro ao excluir lançamentos selecionados',
+        description: 'Alguns itens podem não ter sido removidos.',
+        variant: 'destructive',
+      })
+      loadTransactionsList()
+    } finally {
+      setIsDeletingBatch(false)
     }
   }
 
@@ -819,7 +897,7 @@ export default function TransactionsView() {
 
       {/* Transactions Table */}
       <Card className="border-slate-200 shadow-xs overflow-hidden">
-        <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
+        <CardHeader className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base font-bold text-slate-900">
               Lançamentos Registrados ({totalItems})
@@ -828,6 +906,41 @@ export default function TransactionsView() {
               Histórico consolidado com categorias e método de inserção
             </CardDescription>
           </div>
+
+          {/* Batch Action Bar */}
+          {selectedTxIds.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs animate-in fade-in slide-in-from-top-1">
+              <span className="font-semibold text-slate-700">
+                {selectedTxIds.length} selecionado{selectedTxIds.length > 1 ? 's' : ''}
+              </span>
+              <div className="h-4 w-px bg-slate-300 mx-1" />
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteBatch}
+                disabled={isDeletingBatch}
+                className="h-7 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs"
+              >
+                {isDeletingBatch ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3 w-3" />
+                )}
+                Excluir selecionados
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearSelection}
+                disabled={isDeletingBatch}
+                className="h-7 px-2 text-xs text-slate-600 hover:text-slate-900 gap-1"
+                title="Limpar seleção"
+              >
+                <X className="h-3.5 w-3.5" />
+                Limpar
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
@@ -847,6 +960,20 @@ export default function TransactionsView() {
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/70 border-b border-slate-200 font-semibold text-slate-700 uppercase tracking-wider text-[11px]">
                   <tr>
+                    <th className="py-3 px-3 w-10 text-center">
+                      <Checkbox
+                        checked={
+                          areAllVisibleSelected
+                            ? true
+                            : isSomeVisibleSelected
+                              ? 'indeterminate'
+                              : false
+                        }
+                        onCheckedChange={handleToggleSelectAll}
+                        aria-label="Selecionar todos os lançamentos visíveis"
+                        className="translate-y-[1px]"
+                      />
+                    </th>
                     <th className="py-3 px-4">Data</th>
                     <th className="py-3 px-4">Descrição</th>
                     <th className="py-3 px-4">Categoria</th>
@@ -856,83 +983,99 @@ export default function TransactionsView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {transactions.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-900 tabular-nums">
-                        {tx.date ? normalizeDate(tx.date).split('-').reverse().join('/') : '-'}
-                      </td>
-                      <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">
-                        {tx.description}
-                      </td>
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <Badge
-                          variant="secondary"
-                          className="font-medium text-xs bg-slate-100 text-slate-700"
-                        >
-                          {tx.expand?.category?.name || 'Não Categorizado'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <span
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                            tx.source === 'importado'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}
-                        >
-                          {tx.source === 'importado' ? 'Importado' : 'Manual'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right tabular-nums">
-                        {(() => {
-                          const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-                          const rateUsed = getRateForMonth(txMonth, exchangeRates)
-                          const isEurView = currency === 'EUR'
+                  {transactions.map((tx) => {
+                    const isSelected = selectedTxIds.includes(tx.id)
+                    return (
+                      <tr
+                        key={tx.id}
+                        className={`hover:bg-slate-50/50 transition-colors ${
+                          isSelected ? 'bg-blue-50/40' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-3 text-center">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => handleToggleSelectTx(tx.id)}
+                            aria-label={`Selecionar ${tx.description}`}
+                            className="translate-y-[1px]"
+                          />
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-900 tabular-nums">
+                          {tx.date ? normalizeDate(tx.date).split('-').reverse().join('/') : '-'}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">
+                          {tx.description}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <Badge
+                            variant="secondary"
+                            className="font-medium text-xs bg-slate-100 text-slate-700"
+                          >
+                            {tx.expand?.category?.name || 'Não Categorizado'}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              tx.source === 'importado'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}
+                          >
+                            {tx.source === 'importado' ? 'Importado' : 'Manual'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right tabular-nums">
+                          {(() => {
+                            const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+                            const rateUsed = getRateForMonth(txMonth, exchangeRates)
+                            const isEurView = currency === 'EUR'
 
-                          // If currency is EUR: tx.amount is stored in EUR (from sheet) or in BRL?
-                          // In the sheet import, amount was stored in EUR (val) or in BRL.
-                          // When displaying, formatCurrency uses rateUsed.
-                          // If stored in BRL: formatCurrency(tx.amount, currency, rateUsed)
-                          // If stored in EUR: format in EUR, converted to BRL is tx.amount * rateUsed
-                          // Since transactions are all entries in EUR converted to real:
-                          // Let's display with formatCurrency passing the month rate:
-                          return (
-                            <div className="flex flex-col items-end">
-                              <span className="font-bold text-slate-900">
-                                {formatCurrency(tx.amount, currency, rateUsed)}
-                              </span>
-                              <span
-                                className="text-[10px] text-slate-400 font-normal hover:text-slate-700 cursor-help"
-                                title={`Convertido usando a taxa média de ${txMonth}: € 1 = R$ ${rateUsed.toFixed(2)}`}
-                              >
-                                {isEurView
-                                  ? `câmbio R$ ${rateUsed.toFixed(2)}`
-                                  : `× ${rateUsed.toFixed(2)}`}
-                              </span>
-                            </div>
-                          )
-                        })()}
-                      </td>
-                      <td className="py-3 px-4 text-right whitespace-nowrap space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-slate-500 hover:text-blue-600"
-                          onClick={() => handleOpenEdit(tx)}
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-slate-500 hover:text-red-600"
-                          onClick={() => handleDeleteTx(tx.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                            // If currency is EUR: tx.amount is stored in EUR (from sheet) or in BRL?
+                            // In the sheet import, amount was stored in EUR (val) or in BRL.
+                            // When displaying, formatCurrency uses rateUsed.
+                            // If stored in BRL: formatCurrency(tx.amount, currency, rateUsed)
+                            // If stored in EUR: format in EUR, converted to BRL is tx.amount * rateUsed
+                            // Since transactions are all entries in EUR converted to real:
+                            // Let's display with formatCurrency passing the month rate:
+                            return (
+                              <div className="flex flex-col items-end">
+                                <span className="font-bold text-slate-900">
+                                  {formatCurrency(tx.amount, currency, rateUsed)}
+                                </span>
+                                <span
+                                  className="text-[10px] text-slate-400 font-normal hover:text-slate-700 cursor-help"
+                                  title={`Convertido usando a taxa média de ${txMonth}: € 1 = R$ ${rateUsed.toFixed(2)}`}
+                                >
+                                  {isEurView
+                                    ? `câmbio R$ ${rateUsed.toFixed(2)}`
+                                    : `× ${rateUsed.toFixed(2)}`}
+                                </span>
+                              </div>
+                            )
+                          })()}
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-slate-500 hover:text-blue-600"
+                            onClick={() => handleOpenEdit(tx)}
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-slate-500 hover:text-red-600"
+                            onClick={() => handleDeleteTx(tx.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
