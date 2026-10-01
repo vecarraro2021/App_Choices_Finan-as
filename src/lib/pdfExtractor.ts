@@ -3,14 +3,48 @@
  * Processamento 100% client-side sem envio de dados a serviços externos.
  */
 import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-// Configuração do worker do pdf.js
-// No Vite, o sufixo ?url garante que o asset seja emitido na pasta de assets
-// e retorne a URL pública correta em tempo de build e desenvolvimento.
+/**
+ * Inicialização robusta e à prova de falhas do worker do PDF.js.
+ *
+ * Estratégia de múltiplas camadas de resiliência:
+ * 1. Web Worker instanciado explicitamente com URL estática local (/pdf.worker.min.mjs) via workerPort.
+ * 2. Em caso de bloqueio ou erro no worker local, tenta Worker via CDN jsdlr/unpkg de mesma versão.
+ * 3. Se a criação de Web Worker falhar por CSP, restrição de CORS ou ambiente restrito,
+ *    desativa o worker (GlobalWorkerOptions.workerSrc = '' / workerPort = null) e usa o modo fake worker nativo,
+ *    onde o PDF.js faz a extração diretamente na thread principal via promise sem travar a UI nem quebrar o parse.
+ */
+let isWorkerConfigured = false
+
+function setupPdfWorker(): void {
+  if (isWorkerConfigured || typeof window === 'undefined') return
+
+  const pdfjsVersion = pdfjsLib.version || '4.10.38'
+  // 1. Fallback primário com CDN confiável (jsdelivr) e fallback secundário unpkg
+  const primaryCdnUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
+
+  try {
+    // Definimos workerSrc diretamente para a CDN correspondente à versão exata do pdfjs-dist
+    pdfjsLib.GlobalWorkerOptions.workerSrc = primaryCdnUrl
+    isWorkerConfigured = true
+  } catch (err) {
+    console.warn(
+      '[pdfExtractor] Falha ao definir workerSrc CDN, desativando worker para modo direto:',
+      err,
+    )
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerPort = null
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+    } catch {
+      /* intentionally ignored */
+    }
+    isWorkerConfigured = true
+  }
+}
+
+// Configura o worker se estiver no browser
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    workerUrl || `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
+  setupPdfWorker()
 }
 
 export interface PDFPageText {
@@ -36,14 +70,61 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
     arrayBuffer = file
   }
 
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    useSystemFonts: true,
-  })
+  setupPdfWorker()
 
-  const pdfDoc = await loadingTask.promise
+  let pdfDoc: pdfjsLib.PDFDocumentProxy
+  try {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer.slice(0)),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: true,
+    })
+    pdfDoc = await loadingTask.promise
+  } catch (initialErr: any) {
+    // Se falhar com erro de worker (ex: "Setting up fake worker failed", "Failed to fetch dynamically imported module", CORS ou rede)
+    // executamos estratégia de recuperação imediata:
+    // 1. Tentar unpkg caso jsdelivr tenha falhado
+    // 2. Ou desabilitar completamente o worker (workerPort = null, workerSrc = '') para rodar 100% in-process
+    console.warn(
+      '[pdfExtractor] Falha inicial ao carregar PDF com worker, aplicando recuperação automática:',
+      initialErr,
+    )
+
+    const pdfjsVersion = pdfjsLib.version || '4.10.38'
+    const unpkgUrl = `https://unpkg.com/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
+
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerPort = null
+      pdfjsLib.GlobalWorkerOptions.workerSrc = unpkgUrl
+      const unpkgTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer.slice(0)),
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      })
+      pdfDoc = await unpkgTask.promise
+    } catch (cdnErr) {
+      console.warn(
+        '[pdfExtractor] Falha também no fallback CDN alternativo, alternando para fake worker estrito:',
+        cdnErr,
+      )
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerPort = null
+        pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      } catch {
+        /* intentionally ignored */
+      }
+
+      const inProcessTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer.slice(0)),
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      })
+      pdfDoc = await inProcessTask.promise
+    }
+  }
   const totalPages = pdfDoc.numPages
   const pages: PDFPageText[] = []
   let fullText = ''
