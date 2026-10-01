@@ -43,7 +43,7 @@ import {
   Calendar as CalendarIcon,
   Layers,
   Sparkles,
-  Scale,
+  PiggyBank,
   ChevronDown,
   CheckCircle2,
   Check,
@@ -776,7 +776,7 @@ export default function Index() {
                 RESERVA FINANCEIRA
               </span>
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                <Scale className="h-4 w-4" />
+                <PiggyBank className="h-4 w-4" />
               </div>
             </CardHeader>
             <CardContent className="px-6 pb-5 pt-0">
@@ -798,7 +798,7 @@ export default function Index() {
                 SALDO DISPONÍVEL
               </span>
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                <Scale className="h-4 w-4" />
+                <PiggyBank className="h-4 w-4" />
               </div>
             </CardHeader>
             <CardContent className="px-6 pb-5 pt-0">
