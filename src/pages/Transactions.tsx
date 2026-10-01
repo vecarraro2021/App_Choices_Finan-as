@@ -40,6 +40,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   AlertCircle,
   ArrowRight,
   Sparkles,
@@ -47,9 +48,28 @@ import {
   X,
   Calendar,
   CalendarCheck,
+  CheckCircle2,
+  Copy,
+  Ban,
+  MoreHorizontal,
+  ShoppingCart,
+  Pencil,
+  Tag,
+  Home,
+  Heart,
+  Car,
+  Coffee,
+  BookOpen,
+  Layers,
+  CreditCard,
+  Briefcase,
+  Gift,
+  PlusCircle,
+  TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -60,6 +80,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { CategorySelectCombobox } from '@/components/CategorySelectCombobox'
 import {
   Dialog,
@@ -125,7 +153,7 @@ export default function TransactionsView() {
   const [amountCol, setAmountCol] = useState('')
   const [amountCurrency, setAmountCurrency] = useState<'EUR' | 'BRL'>('EUR') // Seletor de moeda da coluna de valores (padrão EUR)
   const [categoryCol, setCategoryCol] = useState('')
-  const [importFileType, setImportFileType] = useState<'csv' | 'pdf'>('csv')
+  const [importFileType, setImportFileType] = useState<'csv' | 'xlsx' | 'pdf'>('csv')
   const [isProcessingFile, setIsProcessingFile] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2>(1)
   const [currencyMeta, setCurrencyMeta] = useState<{
@@ -401,7 +429,9 @@ export default function TransactionsView() {
 
     try {
       setIsProcessingFile(true)
-      setImportFileType('csv')
+      const isXlsx =
+        file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')
+      setImportFileType(isXlsx ? 'xlsx' : 'csv')
       setUploadedFileName(file.name)
       setImportStep(1)
       setShowCurrencyOverrideSelect(false)
@@ -503,12 +533,50 @@ export default function TransactionsView() {
     }
   }
 
+  // Retorna o ícone representativo de uma categoria para o trigger do combobox
+  const getCategoryLeadingIcon = (catId?: string) => {
+    if (!catId || catId === 'none') {
+      return <ShoppingCart className="h-3.5 w-3.5 text-slate-400" />
+    }
+    const cat = categories.find((c) => c.id === catId)
+    if (!cat) return <ShoppingCart className="h-3.5 w-3.5 text-slate-400" />
+
+    // Se for subcategoria, pode usar o ícone da mãe
+    const iconName =
+      cat.icon || (cat.parent ? categories.find((c) => c.id === cat.parent)?.icon : undefined)
+    switch (iconName) {
+      case 'Home':
+        return <Home className="h-3.5 w-3.5 text-slate-500" />
+      case 'Heart':
+        return <Heart className="h-3.5 w-3.5 text-slate-500" />
+      case 'Car':
+        return <Car className="h-3.5 w-3.5 text-slate-500" />
+      case 'Coffee':
+        return <Coffee className="h-3.5 w-3.5 text-slate-500" />
+      case 'BookOpen':
+        return <BookOpen className="h-3.5 w-3.5 text-slate-500" />
+      case 'Layers':
+        return <Layers className="h-3.5 w-3.5 text-slate-500" />
+      case 'CreditCard':
+        return <CreditCard className="h-3.5 w-3.5 text-slate-500" />
+      case 'Briefcase':
+        return <Briefcase className="h-3.5 w-3.5 text-slate-500" />
+      case 'Gift':
+        return <Gift className="h-3.5 w-3.5 text-slate-500" />
+      case 'TrendingUp':
+        return <TrendingUp className="h-3.5 w-3.5 text-slate-500" />
+      default:
+        return <ShoppingCart className="h-3.5 w-3.5 text-slate-500" />
+    }
+  }
+
   // Recalcula datas e meses de preview baseado no modo de competência escolhido
   const recalculatePreviewDates = (
     baseRows: typeof rawParsedRows,
     mode: 'competence' | 'original',
     targetMonth: string,
     curr: 'EUR' | 'BRL',
+    preserveSelections?: PreviewTransaction[],
   ) => {
     return baseRows.map((raw, idx) => {
       const effectiveMonth = mode === 'competence' ? targetMonth : raw.month
@@ -527,6 +595,10 @@ export default function TransactionsView() {
         amountBrl = Math.round(raw.amount * rateUsed * 100) / 100
       }
 
+      const prev = preserveSelections?.find((p) => p.id === (raw.id || `preview-${idx}`))
+      const prevSelected = prev ? prev.selected !== false : true
+      const prevCategory = prev?.category !== undefined ? prev.category : raw.category
+
       return {
         id: raw.id || `preview-${idx}`,
         date: effectiveDate,
@@ -535,10 +607,104 @@ export default function TransactionsView() {
         amount: amountBrl,
         originalAmount: raw.rawAmount !== undefined ? raw.rawAmount : raw.amount,
         originalCurrency: curr,
-        category: raw.category,
+        category: prevCategory,
         month: effectiveMonth,
-        selected: true,
+        selected: prevSelected,
       }
+    })
+  }
+
+  // Helper para atualizar data individual de uma linha do preview (dd/MM/yyyy ou YYYY-MM-DD)
+  const handleUpdatePreviewDate = (idx: number, rawInput: string) => {
+    const updated = [...previewList]
+    const item = updated[idx]
+    if (!item) return
+    const normalized = normalizeDate(rawInput)
+    item.date = normalized
+    item.month = normalized.slice(0, 7)
+    setPreviewList(updated)
+  }
+
+  // Ações em lote na etapa de pré-visualização (linhas selecionadas)
+  const previewSelectedCount = useMemo(
+    () => previewList.filter((it) => it.selected !== false).length,
+    [previewList],
+  )
+
+  const handleApplyBatchCategoryToPreview = (catId: string) => {
+    const chosen = catId === 'none' ? undefined : catId
+    setPreviewList((prev) =>
+      prev.map((it) => (it.selected !== false ? { ...it, category: chosen } : it)),
+    )
+    toast({
+      title: 'Categoria aplicada em lote',
+      description: `Categoria atualizada para ${previewSelectedCount} lançamento(s) selecionado(s).`,
+    })
+  }
+
+  const handleApplyBatchCompetenceToPreview = (newMonth: string) => {
+    setPreviewList((prev) =>
+      prev.map((it) => {
+        if (it.selected === false) return it
+        const rawDay = parseInt(it.date.slice(8, 10), 10) || 1
+        const [tY, tM] = newMonth.split('-').map((v) => parseInt(v, 10))
+        const maxDays = new Date(tY, tM, 0).getDate()
+        const clamped = Math.min(Math.max(1, rawDay), maxDays)
+        const newDate = `${newMonth}-${String(clamped).padStart(2, '0')}`
+        return {
+          ...it,
+          date: newDate,
+          month: newMonth,
+        }
+      }),
+    )
+    toast({
+      title: 'Competência aplicada em lote',
+      description: `${previewSelectedCount} lançamento(s) movidos para ${formatMonthShort(newMonth)}.`,
+    })
+  }
+
+  const handleDeleteSelectedFromPreview = () => {
+    if (previewSelectedCount === 0) return
+    if (!confirm(`Remover os ${previewSelectedCount} lançamentos selecionados desta importação?`))
+      return
+    setPreviewList((prev) => prev.filter((it) => it.selected === false))
+    toast({
+      title: 'Lançamentos removidos da pré-visualização',
+      description: `${previewSelectedCount} item(ns) excluído(s) da lista a importar.`,
+    })
+  }
+
+  const handleDuplicateSelectedInPreview = () => {
+    if (previewSelectedCount === 0) return
+    const duplicated: PreviewTransaction[] = []
+    previewList.forEach((it) => {
+      duplicated.push(it)
+      if (it.selected !== false) {
+        duplicated.push({
+          ...it,
+          id: `preview-dup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          description: `${it.description} (Cópia)`,
+          selected: true,
+        })
+      }
+    })
+    setPreviewList(duplicated)
+    toast({
+      title: 'Lançamentos duplicados',
+      description: `${previewSelectedCount} item(ns) duplicado(s) com sucesso na lista de importação.`,
+    })
+  }
+
+  const handleToggleDisableSelectedInPreview = () => {
+    if (previewSelectedCount === 0) return
+    // Desmarca todos os selecionados
+    setPreviewList((prev) =>
+      prev.map((it) => (it.selected !== false ? { ...it, selected: false } : it)),
+    )
+    toast({
+      title: 'Lançamentos desmarcados',
+      description: `${previewSelectedCount} lançamento(s) ignorados da importação.`,
     })
   }
 
@@ -660,7 +826,13 @@ export default function TransactionsView() {
   ) => {
     setDateMode(newMode)
     if (rawParsedRows.length > 0) {
-      const updated = recalculatePreviewDates(rawParsedRows, newMode, targetMonth, amountCurrency)
+      const updated = recalculatePreviewDates(
+        rawParsedRows,
+        newMode,
+        targetMonth,
+        amountCurrency,
+        previewList,
+      )
       setPreviewList(updated)
     }
   }
@@ -669,7 +841,13 @@ export default function TransactionsView() {
   const handleCompetenceMonthChange = (newMonth: string) => {
     setCompetenceMonth(newMonth)
     if (dateMode === 'competence' && rawParsedRows.length > 0) {
-      const updated = recalculatePreviewDates(rawParsedRows, 'competence', newMonth, amountCurrency)
+      const updated = recalculatePreviewDates(
+        rawParsedRows,
+        'competence',
+        newMonth,
+        amountCurrency,
+        previewList,
+      )
       setPreviewList(updated)
     }
   }
@@ -1356,166 +1534,151 @@ export default function TransactionsView() {
         </CardContent>
       </Card>
 
-      {/* IMPORT PREVIEW & COLUMN MAPPING MODAL (2 ETAPAS) */}
+      {/* IMPORT PREVIEW & COLUMN MAPPING MODAL (REDESENHADO BASEADO NA REFERÊNCIA) */}
       <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-5 sm:p-6">
-          <DialogHeader className="pb-3 border-b border-slate-100">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <DialogTitle className="flex items-center gap-2 text-lg">
-                <Sparkles className="h-5 w-5 text-blue-600" />
-                {importFileType === 'pdf'
-                  ? 'Importação de Extrato / Fatura PDF'
-                  : 'Importação de Planilha / Extrato'}
-              </DialogTitle>
+        <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-5 sm:p-6 sm:max-w-4xl overflow-hidden">
+          {/* 1. TÍTULO DO MODAL + SUBTÍTULO / INDICADOR DE PASSO */}
+          <DialogHeader className="pb-2 border-b border-slate-100 text-left">
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1">
+                <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold text-slate-900">
+                  <Sparkles className="h-5 w-5 text-blue-600 shrink-0" />
+                  <span>
+                    Revisão e Classificação do Extrato{' '}
+                    {importFileType === 'pdf' ? 'PDF' : importFileType === 'xlsx' ? 'XLSX' : 'CSV'}
+                  </span>
+                </DialogTitle>
 
-              {/* Stepper Indicator */}
-              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg self-start sm:self-auto">
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                {/* Subtítulo / Indicador do passo atual com ícone de check circular azul */}
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 pt-0.5">
+                  <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-blue-600 text-white">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                  </span>
+                  <span>
+                    {importStep === 1
+                      ? 'Etapa 1 de 2 — Competência do Extrato'
+                      : 'Revisão Final do Extrato'}
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-500 font-normal">
+                    {importStep === 1
+                      ? 'Defina o mês de competência das transações e valide a moeda detectada.'
+                      : `${previewList.filter((it) => it.selected !== false).length} de ${previewList.length} lançamentos selecionados para importar.`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Stepper compacto clicável para alternar rapidamente */}
+              <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-1 rounded-lg shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setImportStep(1)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                     importStep === 1
                       ? 'bg-white text-blue-700 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-800'
                   }`}
-                  onClick={() => setImportStep(1)}
-                  role="button"
-                  tabIndex={0}
                 >
                   <span
-                    className={`h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    className={`h-3.5 w-3.5 rounded-full flex items-center justify-center text-[9px] font-bold ${
                       importStep === 1 ? 'bg-blue-600 text-white' : 'bg-emerald-600 text-white'
                     }`}
                   >
                     {importStep > 1 ? '✓' : '1'}
                   </span>
                   <span>1. Competência</span>
-                </div>
-
+                </button>
                 <span className="text-slate-300 text-xs">›</span>
-
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                <button
+                  type="button"
+                  onClick={() => setImportStep(2)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                     importStep === 2 ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-400'
                   }`}
-                  onClick={() => setImportStep(2)}
-                  role="button"
-                  tabIndex={0}
                 >
                   <span
-                    className={`h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    className={`h-3.5 w-3.5 rounded-full flex items-center justify-center text-[9px] font-bold ${
                       importStep === 2 ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-700'
                     }`}
                   >
                     2
                   </span>
-                  <span>2. Gastos e Categorias</span>
-                </div>
+                  <span>2. Gastos & Categorias</span>
+                </button>
               </div>
             </div>
-
-            <DialogDescription className="text-xs text-slate-500 mt-1">
-              {importStep === 1
-                ? 'Etapa 1 de 2: Defina como o sistema deve alocar os meses das compras e confira a moeda identificada.'
-                : 'Etapa 2 de 2: Revise os lançamentos encontrados, confirme as categorias sugeridas e importe.'}
+            <DialogDescription className="sr-only">
+              Revisão e Classificação do Extrato importado
             </DialogDescription>
           </DialogHeader>
 
-          {/* Banner de informações do arquivo e Badge de Moeda Detectada com Fallback Discreto */}
-          <div className="py-2.5 px-3.5 bg-slate-50/90 rounded-lg border border-slate-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <FileText className="h-4 w-4 text-slate-500 shrink-0" />
-              <span className="text-slate-700">
-                Arquivo: <strong>{uploadedFileName || pdfMeta?.fileName || 'Extrato'}</strong>
-                {pdfMeta?.totalPages ? ` (${pdfMeta.totalPages} pág.)` : ''}
-                {pdfMeta?.detectedPeriodLabel && (
-                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-800 font-medium">
-                    Ciclo: {pdfMeta.detectedPeriodLabel}
+          {/* 2. BARRA "FILE AND CURRENCY" */}
+          <div className="mt-2.5 p-2 sm:p-2.5 bg-slate-100/80 rounded-lg border border-slate-200/90 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 text-xs">
+            {/* Nome do arquivo em card / input readonly estilizado */}
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-slate-600 font-semibold shrink-0">File and Currency</span>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-slate-800 font-medium truncate flex-1 shadow-2xs">
+                <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <span
+                  className="truncate"
+                  title={uploadedFileName || pdfMeta?.fileName || 'Extrato'}
+                >
+                  {uploadedFileName || pdfMeta?.fileName || 'Extrato'}
+                </span>
+                {pdfMeta?.totalPages ? (
+                  <span className="text-[10px] text-slate-400 shrink-0">
+                    ({pdfMeta.totalPages} pág.)
                   </span>
-                )}
-                {pdfMeta?.detectedDueDate && (
-                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-slate-200/80 text-slate-700 font-medium">
-                    Venc.: {pdfMeta.detectedDueDate}
-                  </span>
-                )}
-              </span>
+                ) : null}
+              </div>
             </div>
 
-            {/* Badge de Moeda Detectada (sem seletor proeminente) */}
-            <div className="flex items-center gap-2">
-              <div
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                  currencyMeta.confidence === 'fallback'
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                }`}
-                title={currencyMeta.reason || `Moeda inferida automaticamente: ${amountCurrency}`}
-              >
-                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                <span>
-                  Moeda detectada:{' '}
-                  <strong>
-                    {amountCurrency} ({amountCurrency === 'EUR' ? '€' : 'R$'})
-                  </strong>
-                </span>
-                {currencyMeta.confidence === 'fallback' && (
-                  <span className="text-[10px] text-amber-700 font-normal">(padrão)</span>
-                )}
-              </div>
-
-              {/* Fallback discreto */}
-              {!showCurrencyOverrideSelect ? (
+            {/* Chips de Moeda lado a lado: ativo destacado em azul, alternativa em cinza neutro */}
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+              <span className="text-slate-500 font-medium">Currency:</span>
+              <div className="inline-flex items-center gap-1.5 bg-white p-1 rounded-md border border-slate-200 shadow-2xs">
+                {/* Chip EUR */}
                 <button
                   type="button"
-                  onClick={() => setShowCurrencyOverrideSelect(true)}
-                  className="text-[11px] text-slate-500 hover:text-blue-600 underline underline-offset-2 ml-1"
+                  onClick={() => handleApplyCurrencyOverride('EUR')}
+                  className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                    amountCurrency === 'EUR'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Euro (€ EUR)"
                 >
-                  não é esta a moeda?
+                  € EUR
                 </button>
-              ) : (
-                <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded px-1.5 py-0.5 shadow-2xs">
-                  <span className="text-[10px] text-slate-500">Mudar para:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleApplyCurrencyOverride('BRL')
-                      setShowCurrencyOverrideSelect(false)
-                    }}
-                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                      amountCurrency === 'BRL'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    R$ BRL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleApplyCurrencyOverride('EUR')
-                      setShowCurrencyOverrideSelect(false)
-                    }}
-                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                      amountCurrency === 'EUR'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    € EUR
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrencyOverrideSelect(false)}
-                    className="text-slate-400 hover:text-slate-700 text-xs px-1"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
+
+                {/* Chip BRL */}
+                <button
+                  type="button"
+                  onClick={() => handleApplyCurrencyOverride('BRL')}
+                  className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                    amountCurrency === 'BRL'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Real Brasileiro (R$ BRL)"
+                >
+                  R$ BRL
+                </button>
+              </div>
+
+              {/* Informação contextual discreta de detecção */}
+              <span
+                className="hidden md:inline-block text-[11px] text-slate-400"
+                title={currencyMeta.reason || `Moeda inferida: ${amountCurrency}`}
+              >
+                (detectada: {currencyMeta.detectedCurrency})
+              </span>
             </div>
           </div>
 
-          {/* Banner de alerta de sanidade / arquivo ilegível */}
+          {/* Banner de alerta de sanidade / arquivo ilegível se houver */}
           {previewSanityAlert && (
-            <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5">
+            <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5">
               <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <span className="font-semibold block">Aviso de formato ou compatibilidade:</span>
@@ -1524,326 +1687,232 @@ export default function TransactionsView() {
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* ETAPA 1 — COMPETÊNCIA DOS LANÇAMENTOS                    */}
-          {/* ========================================================= */}
-          {importStep === 1 && (
-            <div className="flex-1 overflow-y-auto space-y-4 py-2">
-              <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <CalendarCheck className="h-4 w-4 text-blue-600" />
-                    Como você deseja organizar a competência dos lançamentos?
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Em faturas de cartão de crédito, compras feitas nos últimos dias do mês anterior
-                    costumam constar no ciclo da fatura seguinte. Escolha onde esses gastos devem
-                    entrar no seu orçamento mensal.
-                  </p>
-                </div>
+          {/* 3. SEÇÃO "COMPETÊNCIA & LANÇAMENTOS PARA REVISÃO" */}
+          <div className="mt-2.5 p-3 sm:p-3.5 bg-slate-50/70 rounded-xl border border-slate-200/90 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                  Competência &amp; Lançamentos para Revisão
+                </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Opção Competência da Fatura (Recomendada) */}
-                  <div
-                    onClick={() => handleDateModeChange('competence')}
-                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
-                      dateMode === 'competence'
-                        ? 'border-blue-600 bg-blue-50/60 shadow-xs ring-1 ring-blue-500'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
+                {/* Toggle switch ativo (azul) acompanhado do badge "Fatura de Cartão Detectada" */}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={dateMode === 'competence'}
+                    onCheckedChange={(checked) =>
+                      handleDateModeChange(checked ? 'competence' : 'original')
+                    }
+                    className="data-[state=checked]:bg-blue-600"
+                    id="competence-toggle-switch"
+                  />
+                  <Label
+                    htmlFor="competence-toggle-switch"
+                    className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-800 border border-blue-200/80 shadow-2xs hover:bg-blue-200/70 transition-colors"
                   >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="radio"
-                            name="step1DateMode"
-                            id="step1DateModeCompetence"
-                            checked={dateMode === 'competence'}
-                            onChange={() => handleDateModeChange('competence')}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                          <label
-                            htmlFor="step1DateModeCompetence"
-                            className="font-bold text-slate-900 text-xs sm:text-sm cursor-pointer"
-                          >
-                            Considerar todos os gastos no mês de competência da fatura
-                          </label>
-                        </div>
-                        <Badge className="bg-blue-600 text-white text-[10px] py-0 shrink-0">
-                          Recomendado
-                        </Badge>
-                      </div>
-
-                      <p className="text-xs text-slate-600 pl-6">
-                        Todas as transações do ciclo desta fatura serão agrupadas no orçamento do
-                        mês especificado. Compras do final do mês anterior não sujarão o mês
-                        passado.
-                      </p>
-                    </div>
-
-                    {dateMode === 'competence' && (
-                      <div className="mt-4 pt-3 border-t border-blue-200 pl-6 flex flex-wrap items-center gap-2">
-                        <Label
-                          htmlFor="step1CompetenceSelect"
-                          className="text-xs font-semibold text-blue-900"
-                        >
-                          Mês de Competência da Fatura:
-                        </Label>
-                        <Select
-                          value={competenceMonth}
-                          onValueChange={(val) => handleCompetenceMonthChange(val)}
-                        >
-                          <SelectTrigger
-                            id="step1CompetenceSelect"
-                            className="h-8 text-xs bg-white border-blue-300 w-44"
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableMonths.map((m) => (
-                              <SelectItem key={m} value={m}>
-                                {formatMonthShort(m)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <span className="text-[11px] text-blue-700 font-medium ml-1">
-                          ({previewList.length} compras cairão em{' '}
-                          {formatMonthShort(competenceMonth)})
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Opção Data Original */}
-                  <div
-                    onClick={() => handleDateModeChange('original')}
-                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
-                      dateMode === 'original'
-                        ? 'border-blue-600 bg-blue-50/60 shadow-xs ring-1 ring-blue-500'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2.5">
-                        <input
-                          type="radio"
-                          name="step1DateMode"
-                          id="step1DateModeOriginal"
-                          checked={dateMode === 'original'}
-                          onChange={() => handleDateModeChange('original')}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        />
-                        <label
-                          htmlFor="step1DateModeOriginal"
-                          className="font-bold text-slate-900 text-xs sm:text-sm cursor-pointer"
-                        >
-                          Datar pela data original de cada transação
-                        </label>
-                      </div>
-
-                      <p className="text-xs text-slate-600 pl-6">
-                        Cada compra será registrada no dia exato em que ocorreu. Se o ciclo começou
-                        no fim do mês anterior, essas saídas serão contabilizadas naquele mês
-                        passado.
-                      </p>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-100 pl-6 text-[11px] text-slate-500">
-                      Ideal para extratos de conta corrente ou conciliação diária rigorosa.
-                    </div>
-                  </div>
+                    <span>Fatura de Cartão Detectada</span>
+                    <ChevronDown className="h-3 w-3 text-blue-700" />
+                  </Label>
                 </div>
               </div>
 
-              {/* Mapeamento de Colunas CSV / XLSX (discreto nesta etapa se aplicável) */}
-              {importFileType === 'csv' && (
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-700">
-                      Mapeamento de Colunas da Planilha
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={handleApplyMapping}
-                      className="text-xs h-6 text-blue-600 hover:text-blue-700"
-                    >
-                      Reaplicar colunas
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                    <div>
-                      <Label className="text-[10px] text-slate-500">Data</Label>
-                      <Select value={dateCol} onValueChange={setDateCol}>
-                        <SelectTrigger className="h-7 text-xs bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {uploadedHeaders.map((h) => (
-                            <SelectItem key={h} value={h}>
-                              {h}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label className="text-[10px] text-slate-500">Descrição</Label>
-                      <Select value={descCol} onValueChange={setDescCol}>
-                        <SelectTrigger className="h-7 text-xs bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {uploadedHeaders.map((h) => (
-                            <SelectItem key={h} value={h}>
-                              {h}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label className="text-[10px] text-slate-500">Valor</Label>
-                      <Select value={amountCol} onValueChange={setAmountCol}>
-                        <SelectTrigger className="h-7 text-xs bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {uploadedHeaders.map((h) => (
-                            <SelectItem key={h} value={h}>
-                              {h}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label className="text-[10px] text-slate-500">Categoria (Opcional)</Label>
-                      <Select value={categoryCol} onValueChange={setCategoryCol}>
-                        <SelectTrigger className="h-7 text-xs bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Auto-identificar</SelectItem>
-                          {uploadedHeaders.map((h) => (
-                            <SelectItem key={h} value={h}>
-                              {h}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+              {/* Seletor do mês de competência quando o modo está ativo */}
+              {dateMode === 'competence' && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-slate-500 font-medium">Competência:</span>
+                  <Select
+                    value={competenceMonth}
+                    onValueChange={(val) => handleCompetenceMonthChange(val)}
+                  >
+                    <SelectTrigger className="h-7 text-xs bg-white border-blue-300 w-36 font-semibold text-blue-900">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableMonths.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {formatMonthShort(m)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
+            </div>
 
-              {/* Resumo do que foi identificado */}
-              <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
-                <span className="font-medium">
-                  <strong>{previewList.length}</strong> transações identificadas no arquivo.
+            {/* Opção em radio explicativa da regra de competência selecionada */}
+            <div className="p-2.5 bg-white rounded-lg border border-slate-200/80 text-xs space-y-1.5 shadow-2xs">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="refDateModeRadio"
+                  checked={dateMode === 'competence'}
+                  onChange={() => handleDateModeChange('competence')}
+                  className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-slate-800">
+                    Considerar todos os gastos no mês de competência da fatura (Recomendado)
+                  </span>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Compras realizadas nos últimos dias do mês anterior são computadas na fatura de{' '}
+                    <strong className="text-blue-700 font-semibold">
+                      {formatMonthShort(competenceMonth)}
+                    </strong>
+                    , mantendo o orçamento mensal consistente com o dia do vencimento.
+                  </p>
+                </div>
+              </label>
+
+              {/* Opção secundária discreta para datar pela data original */}
+              <label className="flex items-start gap-2.5 cursor-pointer pt-1 border-t border-slate-100">
+                <input
+                  type="radio"
+                  name="refDateModeRadio"
+                  checked={dateMode === 'original'}
+                  onChange={() => handleDateModeChange('original')}
+                  className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <div className="space-y-0.5">
+                  <span className="font-medium text-slate-700 text-xs">
+                    Datar pela data original de cada transação (extrato de conta bancária ou
+                    conciliação diária)
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Mapeamento de Colunas CSV / XLSX (se aplicável na etapa 1) */}
+          {importFileType === 'csv' && importStep === 1 && (
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2 mt-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-700">
+                  Mapeamento de Colunas da Planilha
                 </span>
-                <span className="text-slate-500">
-                  Na próxima etapa você poderá revisar e alterar categorias individualmente.
-                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleApplyMapping}
+                  className="text-xs h-6 text-blue-600 hover:text-blue-700"
+                >
+                  Reaplicar colunas
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <Label className="text-[10px] text-slate-500">Data</Label>
+                  <Select value={dateCol} onValueChange={setDateCol}>
+                    <SelectTrigger className="h-7 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uploadedHeaders.map((h) => (
+                        <SelectItem key={h} value={h}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-slate-500">Descrição</Label>
+                  <Select value={descCol} onValueChange={setDescCol}>
+                    <SelectTrigger className="h-7 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uploadedHeaders.map((h) => (
+                        <SelectItem key={h} value={h}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-slate-500">Valor</Label>
+                  <Select value={amountCol} onValueChange={setAmountCol}>
+                    <SelectTrigger className="h-7 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uploadedHeaders.map((h) => (
+                        <SelectItem key={h} value={h}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-slate-500">Categoria (Opcional)</Label>
+                  <Select value={categoryCol} onValueChange={setCategoryCol}>
+                    <SelectTrigger className="h-7 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Auto-identificar</SelectItem>
+                      {uploadedHeaders.map((h) => (
+                        <SelectItem key={h} value={h}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* ETAPA 2 — LISTA DE GASTOS E CONFIRMAÇÃO DE CATEGORIAS     */}
-          {/* ========================================================= */}
-          {importStep === 2 && (
-            <div className="flex-1 flex flex-col min-h-0 space-y-3 py-1">
-              {/* Resumo superior dos lançamentos */}
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-slate-600">
-                    Lançamentos:{' '}
-                    <strong className="text-slate-900">
-                      {previewList.filter((it) => it.selected !== false).length} de{' '}
-                      {previewList.length} selecionados
-                    </strong>
-                  </span>
-                  <span className="text-slate-300">•</span>
-                  <span className="text-slate-600">
-                    Total:{' '}
-                    <strong className="text-slate-900">
-                      {formatCurrency(
-                        previewList
-                          .filter((it) => it.selected !== false)
-                          .reduce((sum, it) => sum + (it.amount || 0), 0),
-                        'BRL',
-                      )}
-                    </strong>
-                    {amountCurrency === 'EUR' && (
-                      <span className="text-slate-400 font-normal ml-1">
-                        (orig: €{' '}
-                        {previewList
-                          .filter((it) => it.selected !== false)
-                          .reduce((sum, it) => sum + (it.originalAmount || 0), 0)
-                          .toFixed(2)}
-                        )
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-slate-300">•</span>
-                  <span className="text-slate-600">
-                    Mês de destino:{' '}
-                    <strong className="text-blue-700">
-                      {dateMode === 'competence'
-                        ? formatMonthShort(competenceMonth)
-                        : 'Datas originais'}
-                    </strong>
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const allSelected = previewList.every((it) => it.selected !== false)
-                    setPreviewList(previewList.map((it) => ({ ...it, selected: !allSelected })))
-                  }}
-                  className="font-semibold text-blue-600 hover:text-blue-800 text-[11px] hover:underline"
-                >
-                  {previewList.every((it) => it.selected !== false)
-                    ? 'Desmarcar todos'
-                    : 'Marcar todos'}
-                </button>
-              </div>
-
-              {/* Tabela de transações com seleção de categoria */}
-              <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg max-h-[52vh]">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs">
+          {/* 4. TABELA DE LANÇAMENTOS COM SELEÇÃO, DATA EDITÁVEL, DESCRIÇÃO COM VALOR EM NEGRITO E COMBOBOX */}
+          <div className="flex-1 flex flex-col min-h-0 mt-2.5 space-y-2">
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg max-h-[42vh] sm:max-h-[46vh] bg-white">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-100/90 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs backdrop-blur-xs">
+                  <tr>
+                    <th className="py-2.5 px-3 w-9 text-center">
+                      <input
+                        type="checkbox"
+                        checked={
+                          previewList.length > 0 && previewList.every((it) => it.selected !== false)
+                        }
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          setPreviewList(previewList.map((it) => ({ ...it, selected: checked })))
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="Selecionar todos"
+                      />
+                    </th>
+                    <th className="py-2.5 px-3 w-36">Data</th>
+                    <th className="py-2.5 px-3">Descrição</th>
+                    <th className="py-2.5 px-3 min-w-[260px] max-w-[320px]">Category</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {previewList.length === 0 ? (
                     <tr>
-                      <th className="py-2.5 px-3 w-8 text-center">
-                        <span className="sr-only">Selecionar</span>
-                      </th>
-                      <th className="py-2.5 px-3 w-28">Data</th>
-                      <th className="py-2.5 px-3">Descrição</th>
-                      <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
-                      <th className="py-2.5 px-3 text-right">
-                        Valor ({amountCurrency === 'EUR' ? 'Convertido em R$' : 'R$ BRL'})
-                      </th>
+                      <td colSpan={4} className="py-8 text-center text-slate-400 text-xs">
+                        Nenhum lançamento identificado para exibição.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {previewList.map((row, idx) => {
+                  ) : (
+                    previewList.map((row, idx) => {
                       const isChecked = row.selected !== false
+                      // Formatar valor para o padrão exibido na referência: "• 207 Compras > Mercado"
+                      const formattedAmtVal = Math.round(row.amount || 0)
+                      const dmyFormatted = row.date.split('-').reverse().join('/')
 
                       return (
                         <tr
                           key={row.id}
-                          className={`hover:bg-slate-50 transition-colors ${
-                            !isChecked ? 'opacity-40 bg-slate-50/50' : ''
+                          className={`transition-colors ${
+                            isChecked
+                              ? 'bg-blue-50/20 hover:bg-blue-50/40'
+                              : 'opacity-40 bg-slate-50/40 hover:bg-slate-50/60'
                           }`}
                         >
-                          <td className="py-2.5 px-3 text-center">
+                          {/* Checkbox de seleção da linha */}
+                          <td className="py-2 px-3 text-center align-middle">
                             <input
                               type="checkbox"
                               checked={isChecked}
@@ -1855,31 +1924,52 @@ export default function TransactionsView() {
                               className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
                           </td>
-                          <td className="py-2.5 px-3 whitespace-nowrap tabular-nums font-medium text-slate-900">
-                            {row.date.split('-').reverse().join('/')}
-                            {dateMode === 'competence' &&
-                              row.originalDate &&
-                              row.originalDate !== row.date && (
-                                <span
-                                  className="block text-[10px] text-slate-400 font-normal"
-                                  title={`Data original: ${row.originalDate}`}
-                                >
-                                  orig: {row.originalDate.split('-').reverse().join('/')}
-                                </span>
-                              )}
-                          </td>
-                          <td className="py-2.5 px-3 max-w-[240px]">
-                            <div
-                              className="truncate font-medium text-slate-800"
-                              title={row.description}
-                            >
-                              {row.description}
+
+                          {/* Data editável em formato dd/MM/yyyy */}
+                          <td className="py-2 px-3 align-middle">
+                            <div className="relative">
+                              <Input
+                                type="text"
+                                defaultValue={dmyFormatted}
+                                key={`date-input-${row.id}-${row.date}`}
+                                onBlur={(e) => handleUpdatePreviewDate(idx, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleUpdatePreviewDate(
+                                      idx,
+                                      (e.target as HTMLInputElement).value,
+                                    )
+                                    ;(e.target as HTMLInputElement).blur()
+                                  }
+                                }}
+                                placeholder="dd/mm/aaaa"
+                                className="h-7 text-xs font-medium tabular-nums bg-white border-slate-200 focus:border-blue-500 text-slate-900 w-32 px-2"
+                              />
                             </div>
                           </td>
 
-                          {/* Seletor de Categoria com Combobox pesquisável */}
-                          <td className="py-2.5 px-3">
-                            <div className="w-full max-w-[270px]">
+                          {/* Descrição com valor em negrito com bullet, ex: "• 207 Compras > Mercad..." */}
+                          <td className="py-2 px-3 align-middle max-w-[280px]">
+                            <div
+                              className="flex items-center gap-1.5 truncate text-slate-800"
+                              title={`${row.description} — ${formatCurrency(row.amount, 'BRL')}${
+                                amountCurrency === 'EUR' && row.originalAmount !== undefined
+                                  ? ` (orig: € ${row.originalAmount.toFixed(2)})`
+                                  : ''
+                              }`}
+                            >
+                              <span className="font-bold text-slate-900 shrink-0 tabular-nums">
+                                • {formattedAmtVal}
+                              </span>
+                              <span className="truncate text-slate-700 font-medium">
+                                {row.description}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Category Combobox com ícone de carrinho / categoria e seta */}
+                          <td className="py-2 px-3 align-middle">
+                            <div className="w-full max-w-[280px]">
                               <CategorySelectCombobox
                                 categories={categories}
                                 value={row.category || 'none'}
@@ -1889,110 +1979,261 @@ export default function TransactionsView() {
                                   updated[idx].category = chosen
                                   setPreviewList(updated)
                                 }}
-                                triggerClassName="h-7 text-xs"
-                                placeholder="Selecione a categoria..."
-                                searchPlaceholder="Buscar categoria ou subcategoria..."
+                                triggerClassName="h-7 text-xs bg-white border-slate-200 shadow-2xs"
+                                placeholder="Compras > Mercado"
+                                searchPlaceholder="Buscar categoria..."
                                 emptyText="Nenhuma categoria encontrada."
                                 specialOption={{ id: 'none', label: 'Não Categorizado' }}
+                                leadingIcon={getCategoryLeadingIcon(row.category)}
                               />
-                            </div>
-                          </td>
-
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
-                            <div>
-                              <span>{formatCurrency(row.amount, 'BRL')}</span>
-                              {amountCurrency === 'EUR' && row.originalAmount !== undefined ? (
-                                <span className="block text-[10px] text-slate-400 font-normal">
-                                  (orig: € {row.originalAmount.toFixed(2)})
-                                </span>
-                              ) : (
-                                <span className="block text-[10px] text-emerald-600 font-normal">
-                                  (orig: R${' '}
-                                  {row.originalAmount !== undefined
-                                    ? row.originalAmount.toFixed(2)
-                                    : row.amount.toFixed(2)}
-                                  )
-                                </span>
-                              )}
                             </div>
                           </td>
                         </tr>
                       )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* RODAPÉ DO MODAL (com navegação entre etapas) */}
-          <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-3 pt-3 border-t">
-            <div>
-              {importStep === 1 ? (
-                <span className="text-xs text-slate-500 font-medium">
-                  {previewList.length} lançamento(s) prontos para categorização
-                </span>
-              ) : (
-                <span className="text-xs text-slate-500 font-medium">
-                  Total a importar:{' '}
-                  <strong className="text-slate-800">
-                    {previewList.filter((it) => it.selected !== false).length} de{' '}
-                    {previewList.length} lançamentos
-                  </strong>
-                </span>
-              )}
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex items-center gap-2">
-              {importStep === 1 ? (
-                <>
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowPreviewDialog(false)}
-                    disabled={isImporting}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={() => setImportStep(2)}
-                    disabled={previewList.length === 0 || !dateMode}
-                    className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs gap-1.5"
-                  >
-                    Continuar para Gastos & Categorias
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="outline"
-                    onClick={() => setImportStep(1)}
-                    disabled={isImporting}
-                    className="gap-1.5"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Voltar para Competência
-                  </Button>
-                  <Button
-                    onClick={handleConfirmImport}
-                    disabled={
-                      isImporting ||
-                      previewSanityAlert?.isCorrupted ||
-                      previewList.filter((it) => it.selected !== false).length === 0
+            {/* 5. BARRA DE AÇÕES EM LOTE ABAIXO DA TABELA */}
+            <div className="p-2 bg-slate-50 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+              {/* Lado esquerdo: ícones de ação em sequência */}
+              <div className="flex items-center gap-1">
+                {/* Checkbox mestre da barra de lote */}
+                <input
+                  type="checkbox"
+                  checked={
+                    previewList.length > 0 && previewList.every((it) => it.selected !== false)
+                  }
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setPreviewList(previewList.map((it) => ({ ...it, selected: checked })))
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer mr-1"
+                  title="Selecionar todos os lançamentos"
+                />
+
+                {/* Ícone Editar (lápis) */}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={previewSelectedCount === 0}
+                  onClick={() => {
+                    const newDay = prompt(
+                      'Defina o dia do mês para os lançamentos selecionados (1 a 31):',
+                    )
+                    if (newDay && parseInt(newDay, 10) >= 1 && parseInt(newDay, 10) <= 31) {
+                      const dPad = String(parseInt(newDay, 10)).padStart(2, '0')
+                      setPreviewList((prev) =>
+                        prev.map((it) => {
+                          if (it.selected === false) return it
+                          const [y, m] = it.date.split('-')
+                          return { ...it, date: `${y}-${m}-${dPad}` }
+                        }),
+                      )
+                      toast({
+                        title: 'Data ajustada',
+                        description: `Dia atualizado para ${dPad} nos itens selecionados.`,
+                      })
                     }
-                    className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
+                  }}
+                  className="h-7 w-7 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"
+                  title="Editar data dos itens selecionados"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+
+                {/* Ícone Copiar / Duplicar */}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={previewSelectedCount === 0}
+                  onClick={handleDuplicateSelectedInPreview}
+                  className="h-7 w-7 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"
+                  title="Duplicar lançamentos selecionados"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+
+                {/* Ícone Lixeira (excluir) */}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={previewSelectedCount === 0}
+                  onClick={handleDeleteSelectedFromPreview}
+                  className="h-7 w-7 text-slate-600 hover:text-red-600 hover:bg-red-50"
+                  title="Remover selecionados da importação"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+
+                {/* Ícone Bloquear / Desmarcar */}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={previewSelectedCount === 0}
+                  onClick={handleToggleDisableSelectedInPreview}
+                  className="h-7 w-7 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"
+                  title="Desmarcar selecionados (não importar)"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                </Button>
+
+                {/* Ícone Mais ações (...) com dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={previewSelectedCount === 0}
+                      className="h-7 w-7 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"
+                      title="Mais ações"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56 text-xs">
+                    <DropdownMenuLabel>
+                      Ações em Lote ({previewSelectedCount} itens)
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setPreviewList((prev) =>
+                          prev.map((it) =>
+                            it.selected !== false ? { ...it, category: undefined } : it,
+                          ),
+                        )
+                        toast({ title: 'Categorias limpas para os itens selecionados' })
+                      }}
+                    >
+                      Remover Categoria (Deixar sem)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setPreviewList((prev) => prev.map((it) => ({ ...it, selected: true })))
+                      }}
+                    >
+                      Selecionar Todos os Itens
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <span className="text-[11px] text-slate-500 font-medium ml-1">
+                  {previewSelectedCount} selecionado(s)
+                </span>
+              </div>
+
+              {/* Lado direito: Dropdown / Botão "Apply category > or competency" */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={previewSelectedCount === 0}
+                    className="h-7 text-xs bg-white text-slate-700 font-medium border-slate-300 hover:bg-slate-100 gap-1.5 shadow-2xs"
                   >
-                    {isImporting ? (
-                      <>
-                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                        Gravando lançamentos...
-                      </>
-                    ) : (
-                      'Confirmar e Importar'
-                    )}
+                    <span>Aplicar categoria ou competência</span>
+                    <ChevronRight className="h-3 w-3 text-slate-400" />
                   </Button>
-                </>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto text-xs">
+                  <DropdownMenuLabel>Mudar Competência em Lote</DropdownMenuLabel>
+                  {availableMonths.map((m) => (
+                    <DropdownMenuItem
+                      key={`batch-comp-${m}`}
+                      onClick={() => handleApplyBatchCompetenceToPreview(m)}
+                    >
+                      Mover para {formatMonthShort(m)}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Aplicar Categoria em Lote</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => handleApplyBatchCategoryToPreview('none')}>
+                    Deixar sem categoria
+                  </DropdownMenuItem>
+                  {categories.map((c) => (
+                    <DropdownMenuItem
+                      key={`batch-cat-${c.id}`}
+                      onClick={() => handleApplyBatchCategoryToPreview(c.id)}
+                    >
+                      {c.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          {/* 6. RODAPÉ DO MODAL: CANCELAR E SALVAR E IMPORTAR */}
+          <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-3 pt-3 border-t">
+            <div className="flex items-center gap-2">
+              {importStep === 2 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setImportStep(1)}
+                  disabled={isImporting}
+                  className="text-xs text-slate-600 hover:text-slate-900 gap-1"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Voltar para Competência
+                </Button>
               )}
+              {importStep === 1 && (
+                <span className="text-xs text-slate-500 font-medium">
+                  {previewList.length} lançamento(s) identificados no arquivo
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <Button
+                variant="outline"
+                onClick={() => setShowPreviewDialog(false)}
+                disabled={isImporting}
+                className="border-slate-300 text-slate-700 hover:bg-slate-100 font-medium"
+              >
+                Cancelar
+              </Button>
+
+              {importStep === 1 && (
+                <Button
+                  variant="outline"
+                  onClick={() => setImportStep(2)}
+                  disabled={previewList.length === 0}
+                  className="border-blue-200 text-blue-700 hover:bg-blue-50 font-medium text-xs gap-1"
+                >
+                  Ver Gastos &amp; Categorias
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Button>
+              )}
+
+              <Button
+                onClick={handleConfirmImport}
+                disabled={
+                  isImporting ||
+                  previewSanityAlert?.isCorrupted ||
+                  previewList.filter((it) => it.selected !== false).length === 0
+                }
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-xs"
+              >
+                {isImporting ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    Gravando lançamentos...
+                  </>
+                ) : (
+                  'Salvar e Importar'
+                )}
+              </Button>
             </div>
           </DialogFooter>
         </DialogContent>

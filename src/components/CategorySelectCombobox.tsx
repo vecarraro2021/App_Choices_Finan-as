@@ -39,6 +39,10 @@ interface CategorySelectComboboxProps {
     id: string
     label: string
   }
+  /**
+   * Optional custom leading icon or renderer for the trigger
+   */
+  leadingIcon?: React.ReactNode
 }
 
 // Remove accents and normalize for search
@@ -61,6 +65,7 @@ export function CategorySelectCombobox({
   triggerClassName,
   excludeCategoryId,
   specialOption,
+  leadingIcon,
 }: CategorySelectComboboxProps) {
   const [open, setOpen] = React.useState(false)
 
@@ -154,7 +159,10 @@ export function CategorySelectCombobox({
             triggerClassName,
           )}
         >
-          <span className="truncate">{selectedLabel}</span>
+          <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+            {leadingIcon && <span className="shrink-0 text-slate-500">{leadingIcon}</span>}
+            <span className="truncate">{selectedLabel}</span>
+          </div>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
