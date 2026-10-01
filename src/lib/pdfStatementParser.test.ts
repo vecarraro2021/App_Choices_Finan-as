@@ -1,5 +1,33 @@
 import { describe, it, expect } from 'vitest'
-import { parsePDFStatement } from './pdfStatementParser'
+import { parsePDFStatement, inferInvoiceCompetence } from './pdfStatementParser'
+
+describe('inferInvoiceCompetence', () => {
+  it('detecta competência de fatura Nubank com período 31 AGO a 30 SET e vencimento em OUT', () => {
+    const text = `
+      Olá, Verônica.
+      Esta é a sua fatura de outubro, no valor de R$ 2.499,33
+      Data de vencimento: 07 OUT 2026
+      Período vigente: 31 AGO a 30 SET
+      Limite total do cartão de crédito: R$ 5.211,74
+    `
+    const result = inferInvoiceCompetence(text, 2026)
+    expect(result.isInvoice).toBe(true)
+    expect(result.competenceMonth).toBe('2026-09')
+    expect(result.periodLabel).toBe('31 AGO a 30 SET')
+    expect(result.dueDate).toBe('07 OUT 2026')
+  })
+
+  it('detecta competência pelo vencimento quando período não está explícito', () => {
+    const text = `
+      Fatura de Cartão de Crédito
+      Vencimento: 10/10/2026
+      Total da fatura: R$ 1.500,00
+    `
+    const result = inferInvoiceCompetence(text, 2026)
+    expect(result.isInvoice).toBe(true)
+    expect(result.competenceMonth).toBe('2026-09')
+  })
+})
 
 describe('parsePDFStatement', () => {
   it('deve extrair transações em formato brasileiro padrão (DD/MM/YYYY e valor 1.234,56)', () => {
@@ -123,5 +151,27 @@ describe('parsePDFStatement', () => {
     expect(result.transactions).toHaveLength(0)
     expect(result.reason).toBeDefined()
     expect(result.reason).toContain('Não foi possível identificar transações')
+  })
+
+  it('identifica fatura Nubank com competência de setembro mesmo com compras iniciadas em agosto', () => {
+    const lines = [
+      'Olá, Verônica.',
+      'Esta é a sua fatura de outubro, no valor de R$ 2.499,33',
+      'Data de vencimento: 07 OUT 2026',
+      'Período vigente: 31 AGO a 30 SET',
+      'TRANSAÇÕES DE 31 AGO A 30 SET',
+      '31 AGO •••• 2072 Htm *Aura - Parcela 5/6 R$ 73,02',
+      '31 AGO •••• 8930 Landmark Wor*Caplandma - Parcela 3/5 R$ 420,00',
+      '02 SET •••• 4725 Supermercado Pinheir R$ 332,33',
+      '15 SET Pix Protegido R$ 6,99',
+    ]
+    const fullText = lines.join('\n')
+    const result = parsePDFStatement(lines, fullText)
+
+    expect(result.isCreditCardInvoice).toBe(true)
+    expect(result.detectedCompetenceMonth).toBe('2026-09')
+    expect(result.detectedPeriodLabel).toBe('31 AGO a 30 SET')
+    expect(result.detectedDueDate).toBe('07 OUT 2026')
+    expect(result.transactions.length).toBeGreaterThanOrEqual(4)
   })
 })

@@ -28,10 +28,14 @@ export interface PDFParseResult {
   totalLinesScanned: number
   unrecognizedLines: string[]
   reason?: string
+  detectedCompetenceMonth?: string // YYYY-MM inferido da fatura/período vigente
+  detectedPeriodLabel?: string // Ex: "31 AGO a 30 SET"
+  detectedDueDate?: string // Ex: "07 OUT 2026" ou "07/10/2026"
+  isCreditCardInvoice?: boolean
 }
 
 // Meses em português para extratos que usam formato "15 JAN" ou "15 Jan 2026"
-const PT_MONTHS: Record<string, string> = {
+export const PT_MONTHS: Record<string, string> = {
   jan: '01',
   fev: '02',
   feb: '02',
@@ -42,6 +46,7 @@ const PT_MONTHS: Record<string, string> = {
   may: '05',
   jun: '06',
   jul: '07',
+  agu: '08',
   ago: '08',
   aug: '08',
   set: '09',
@@ -117,6 +122,114 @@ function inferDocumentYear(fullText: string): number {
   }
 
   return currentYear
+}
+
+/**
+ * Detecta competência e metadados de fatura de cartão de crédito.
+ * Exemplo Nubank: "Período vigente: 31 AGO a 30 SET", "Data de vencimento: 07 OUT 2026", "TRANSAÇÕES DE 31 AGO A 30 SET"
+ * Competência principal da fatura = mês final do período de compras (ex: SET/2026 -> 2026-09)
+ * ou mês anterior ao vencimento.
+ */
+export function inferInvoiceCompetence(
+  fullText: string,
+  docYear: number,
+): {
+  competenceMonth?: string
+  periodLabel?: string
+  dueDate?: string
+  isInvoice: boolean
+} {
+  const isInvoice =
+    /fatura|cart[aã]o\s+de\s+cr[eé]dito|limite\s+total|pagamento\s+m[ií]nimo|fechamento\s+da\s+pr[oó]xima\s+fatura/i.test(
+      fullText,
+    )
+
+  let periodLabel: string | undefined
+  let dueDate: string | undefined
+  let competenceMonth: string | undefined
+
+  // 1. Período vigente (ex: "Período vigente: 31 AGO a 30 SET" ou "TRANSAÇÕES DE 31 AGO A 30 SET" ou "31/08 a 30/09")
+  const periodMatch = fullText.match(
+    /(?:per[ií]odo(?:\s+vigente)?|transa[çc][oõ]es\s+de)\s*[:-]?\s*(\d{1,2}\s+[A-Za-z]{3}\s+a\s+\d{1,2}\s+[A-Za-z]{3}(?:\s+\d{2,4})?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s+a\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
+  )
+
+  if (periodMatch) {
+    periodLabel = periodMatch[1].trim()
+    // Tenta extrair o mês final do período (a competência da fatura)
+    // Ex: "31 AGO a 30 SET" -> "30 SET"
+    const textEndMatch = periodLabel.match(/a\s+(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i)
+    if (textEndMatch) {
+      const monthKey = textEndMatch[2].toLowerCase()
+      const m = PT_MONTHS[monthKey]
+      let y = textEndMatch[3] ? parseInt(textEndMatch[3], 10) : docYear
+      if (y < 100) y = 2000 + y
+      if (m && y >= 2020 && y <= 2035) {
+        competenceMonth = `${y}-${m}`
+      }
+    } else {
+      const numEndMatch = periodLabel.match(/a\s+\d{1,2}[/-](\d{1,2})(?:[/-](\d{2,4}))?/i)
+      if (numEndMatch) {
+        const m = numEndMatch[1].padStart(2, '0')
+        let y = numEndMatch[2] ? parseInt(numEndMatch[2], 10) : docYear
+        if (y < 100) y = 2000 + y
+        if (parseInt(m, 10) >= 1 && parseInt(m, 10) <= 12 && y >= 2020 && y <= 2035) {
+          competenceMonth = `${y}-${m}`
+        }
+      }
+    }
+  }
+
+  // 2. Data de vencimento (ex: "Data de vencimento: 07 OUT 2026" ou "Vencimento: 07/10/2026")
+  const dueMatch = fullText.match(
+    /(?:data\s+de\s+vencimento|vencimento)\s*[:-]?\s*(\d{1,2}\s+[A-Za-z]{3}(?:\s+\d{2,4})?|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+  )
+  if (dueMatch) {
+    dueDate = dueMatch[1].trim()
+    // Se ainda não temos competenceMonth, inferir como o mês anterior ao vencimento (ou o próprio mês se o fechamento for no mesmo mês)
+    if (!competenceMonth) {
+      const textDue = dueDate.match(/^(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i)
+      if (textDue) {
+        const mKey = textDue[2].toLowerCase()
+        const dueM = PT_MONTHS[mKey]
+        let dueY = textDue[3] ? parseInt(textDue[3], 10) : docYear
+        if (dueY < 100) dueY = 2000 + dueY
+        if (dueM) {
+          const dueDay = parseInt(textDue[1], 10)
+          // Se o vencimento é no início do mês (dia <= 15), a competência das despesas quase sempre é o mês anterior
+          if (dueDay <= 15) {
+            const mNum = parseInt(dueM, 10)
+            const compM = mNum === 1 ? 12 : mNum - 1
+            const compY = mNum === 1 ? dueY - 1 : dueY
+            competenceMonth = `${compY}-${String(compM).padStart(2, '0')}`
+          } else {
+            competenceMonth = `${dueY}-${dueM}`
+          }
+        }
+      } else {
+        const numDue = dueDate.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/i)
+        if (numDue) {
+          const dueDay = parseInt(numDue[1], 10)
+          const dueM = parseInt(numDue[2], 10)
+          let dueY = parseInt(numDue[3], 10)
+          if (dueY < 100) dueY = 2000 + dueY
+          if (dueDay <= 15) {
+            const compM = dueM === 1 ? 12 : dueM - 1
+            const compY = dueM === 1 ? dueY - 1 : dueY
+            competenceMonth = `${compY}-${String(compM).padStart(2, '0')}`
+          } else {
+            competenceMonth = `${dueY}-${String(dueM).padStart(2, '0')}`
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    competenceMonth,
+    periodLabel,
+    dueDate,
+    isInvoice,
+  }
 }
 
 /**
@@ -414,12 +527,19 @@ export function parsePDFStatement(
   // Ordenar transações por data cronológica
   transactions.sort((a, b) => a.date.localeCompare(b.date))
 
+  // Detecção de competência da fatura (período vigente, vencimento)
+  const invoiceMeta = inferInvoiceCompetence(fullText, detectedYear)
+
   return {
     transactions,
     detectedYear,
     detectedCurrency,
     totalLinesScanned: lines.length,
     unrecognizedLines,
+    detectedCompetenceMonth: invoiceMeta.competenceMonth,
+    detectedPeriodLabel: invoiceMeta.periodLabel,
+    detectedDueDate: invoiceMeta.dueDate,
+    isCreditCardInvoice: invoiceMeta.isInvoice,
     reason:
       transactions.length === 0
         ? 'Não foi possível identificar transações neste PDF — pode ser protegido por senha, digitalizado sem camada de texto (imagem) ou em formato não reconhecido.'

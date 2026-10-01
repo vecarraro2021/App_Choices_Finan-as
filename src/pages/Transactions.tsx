@@ -7,6 +7,7 @@ import {
   createTransaction,
   createTransactionsBatch,
   updateTransaction,
+  updateTransactionsMonthBatch,
   deleteTransaction,
   getExchangeRates,
   getRateForMonth,
@@ -44,6 +45,8 @@ import {
   Sparkles,
   Loader2,
   X,
+  Calendar,
+  CalendarCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -79,6 +82,7 @@ interface PreviewTransaction {
   category?: string
   month: string
   selected?: boolean
+  originalDate?: string
 }
 
 export default function TransactionsView() {
@@ -106,6 +110,10 @@ export default function TransactionsView() {
   // Multi-selection state
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
   const [isDeletingBatch, setIsDeletingBatch] = useState(false)
+  const [showBatchMonthModal, setShowBatchMonthModal] = useState(false)
+  const [batchTargetMonth, setBatchTargetMonth] = useState('2026-09')
+  const [batchAdjustDates, setBatchAdjustDates] = useState(true)
+  const [isRelocatingBatch, setIsRelocatingBatch] = useState(false)
 
   // Upload & Mapping state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -123,7 +131,26 @@ export default function TransactionsView() {
     currency: 'BRL' | 'EUR'
     year?: number
     totalPages: number
+    detectedCompetenceMonth?: string
+    detectedPeriodLabel?: string
+    detectedDueDate?: string
+    isCreditCardInvoice?: boolean
   } | null>(null)
+  const [dateMode, setDateMode] = useState<'competence' | 'original'>('original')
+  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-09')
+  const [rawParsedRows, setRawParsedRows] = useState<
+    Array<{
+      id: string
+      date: string
+      rawDate?: string
+      description: string
+      amount: number
+      rawAmount?: number
+      currency: 'BRL' | 'EUR'
+      category?: string
+      month: string
+    }>
+  >([])
   const [previewList, setPreviewList] = useState<PreviewTransaction[]>([])
   const [showPreviewDialog, setShowPreviewDialog] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -249,29 +276,67 @@ export default function TransactionsView() {
         currency: initialPdfCurrency,
         year: parseResult.detectedYear,
         totalPages: extracted.totalPages,
+        detectedCompetenceMonth: parseResult.detectedCompetenceMonth,
+        detectedPeriodLabel: parseResult.detectedPeriodLabel,
+        detectedDueDate: parseResult.detectedDueDate,
+        isCreditCardInvoice: parseResult.isCreditCardInvoice,
       })
 
-      // Converter transações detectadas para o modelo PreviewTransaction
-      const preview: PreviewTransaction[] = parseResult.transactions.map((tx, idx) => {
-        const matchResult = evaluateCategoryMatch(tx.description, categories)
-        const rateUsed = getRateForMonth(tx.month, exchangeRates)
+      // Se for fatura de cartão de crédito e identificamos o mês de competência,
+      // pré-selecionar 'competence' para que todas as despesas fiquem agrupadas no mês da fatura!
+      const initialCompMonth =
+        parseResult.detectedCompetenceMonth ||
+        (parseResult.transactions[0] ? parseResult.transactions[0].month : '2026-09')
+      setCompetenceMonth(initialCompMonth)
 
-        let amountBrl = tx.amount
-        if (initialPdfCurrency === 'EUR') {
-          amountBrl = Math.round(tx.amount * rateUsed * 100) / 100
+      const useCompetenceByInitial =
+        parseResult.isCreditCardInvoice || Boolean(parseResult.detectedCompetenceMonth)
+      setDateMode(useCompetenceByInitial ? 'competence' : 'original')
+
+      const rawItems = parseResult.transactions.map((tx, idx) => {
+        const matchResult = evaluateCategoryMatch(tx.description, categories)
+        return {
+          id: `pdf-raw-${idx}`,
+          date: tx.date,
+          rawDate: tx.rawDate,
+          description: tx.description,
+          amount: tx.amount,
+          rawAmount: tx.amount,
+          currency: initialPdfCurrency,
+          category: matchResult.categoryId || undefined,
+          month: tx.month,
+        }
+      })
+      setRawParsedRows(rawItems)
+
+      // Converter transações detectadas para o modelo PreviewTransaction aplicando modo de data
+      const preview: PreviewTransaction[] = rawItems.map((raw, idx) => {
+        const effectiveMonth = useCompetenceByInitial ? initialCompMonth : raw.month
+        let effectiveDate = raw.date
+        if (useCompetenceByInitial) {
+          const rawDay = parseInt(raw.date.slice(8, 10), 10) || 1
+          const [tY, tM] = initialCompMonth.split('-').map((v) => parseInt(v, 10))
+          const maxDays = new Date(tY, tM, 0).getDate()
+          const clamped = Math.min(Math.max(1, rawDay), maxDays)
+          effectiveDate = `${initialCompMonth}-${String(clamped).padStart(2, '0')}`
         }
 
-        const initialCategory = matchResult.categoryId || undefined
+        const rateUsed = getRateForMonth(effectiveMonth, exchangeRates)
+        let amountBrl = raw.amount
+        if (initialPdfCurrency === 'EUR') {
+          amountBrl = Math.round(raw.amount * rateUsed * 100) / 100
+        }
 
         return {
           id: `pdf-preview-${idx}`,
-          date: tx.date,
-          description: tx.description,
+          date: effectiveDate,
+          originalDate: raw.date,
+          description: raw.description,
           amount: amountBrl,
-          originalAmount: tx.amount,
+          originalAmount: raw.amount,
           originalCurrency: initialPdfCurrency,
-          category: initialCategory,
-          month: tx.month,
+          category: raw.category,
+          month: effectiveMonth,
           selected: true,
         }
       })
@@ -397,7 +462,46 @@ export default function TransactionsView() {
     }
   }
 
-  // Build preview items with auto-categorization by keywords
+  // Recalcula datas e meses de preview baseado no modo de competência escolhido
+  const recalculatePreviewDates = (
+    baseRows: typeof rawParsedRows,
+    mode: 'competence' | 'original',
+    targetMonth: string,
+    curr: 'EUR' | 'BRL',
+  ) => {
+    return baseRows.map((raw, idx) => {
+      const effectiveMonth = mode === 'competence' ? targetMonth : raw.month
+      let effectiveDate = raw.date
+      if (mode === 'competence') {
+        const rawDay = parseInt(raw.date.slice(8, 10), 10) || 1
+        const [tY, tM] = targetMonth.split('-').map((v) => parseInt(v, 10))
+        const maxDays = new Date(tY, tM, 0).getDate()
+        const clamped = Math.min(Math.max(1, rawDay), maxDays)
+        effectiveDate = `${targetMonth}-${String(clamped).padStart(2, '0')}`
+      }
+
+      const rateUsed = getRateForMonth(effectiveMonth, exchangeRates)
+      let amountBrl = raw.amount
+      if (curr === 'EUR') {
+        amountBrl = Math.round(raw.amount * rateUsed * 100) / 100
+      }
+
+      return {
+        id: raw.id || `preview-${idx}`,
+        date: effectiveDate,
+        originalDate: raw.date,
+        description: raw.description,
+        amount: amountBrl,
+        originalAmount: raw.rawAmount !== undefined ? raw.rawAmount : raw.amount,
+        originalCurrency: curr,
+        category: raw.category,
+        month: effectiveMonth,
+        selected: true,
+      }
+    })
+  }
+
+  // Build preview items with auto-categorization by keywords (CSV / XLSX)
   const buildPreview = (
     rows: ParsedRow[],
     dCol: string,
@@ -405,21 +509,15 @@ export default function TransactionsView() {
     amtCol: string,
     cCol: string,
     colCurrency: 'EUR' | 'BRL' = amountCurrency,
+    overrideMode: 'competence' | 'original' = dateMode,
+    overrideCompMonth: string = competenceMonth,
   ) => {
-    const preview: PreviewTransaction[] = rows.map((r, i) => {
+    const rawItems = rows.map((r, i) => {
       const rawDate = r[dCol]
       const normDate = normalizeDate(rawDate)
       const desc = r[descC] || 'Sem descrição'
       const rawAmt = parseAmount(r[amtCol])
-      const month = normDate.slice(0, 7)
-      const rateUsed = getRateForMonth(month, exchangeRates)
-
-      // Se a coluna for EUR, converte para BRL pela taxa do mês
-      // Se for BRL, mantém o valor original sem conversão
-      let finalAmountBrl = rawAmt
-      if (colCurrency === 'EUR') {
-        finalAmountBrl = Math.round(rawAmt * rateUsed * 100) / 100
-      }
+      const m = normDate.slice(0, 7)
 
       // Attempt matching category from file column or auto-categorizer
       let assignedCat: string | undefined
@@ -438,18 +536,21 @@ export default function TransactionsView() {
       }
 
       return {
-        id: `preview-${i}`,
+        id: `csv-raw-${i}`,
         date: normDate,
+        rawDate,
         description: desc,
-        amount: finalAmountBrl,
-        originalAmount: rawAmt,
-        originalCurrency: colCurrency,
+        amount: rawAmt,
+        rawAmount: rawAmt,
+        currency: colCurrency,
         category: assignedCat,
-        month,
-        selected: true,
+        month: m,
       }
     })
 
+    setRawParsedRows(rawItems)
+
+    const preview = recalculatePreviewDates(rawItems, overrideMode, overrideCompMonth, colCurrency)
     setPreviewList(preview)
   }
 
@@ -483,7 +584,37 @@ export default function TransactionsView() {
       typeof forcedCurrency === 'string' && (forcedCurrency === 'EUR' || forcedCurrency === 'BRL')
         ? forcedCurrency
         : amountCurrency
-    buildPreview(rawRows, dateCol, descCol, amountCol, categoryCol, effCurr)
+    buildPreview(
+      rawRows,
+      dateCol,
+      descCol,
+      amountCol,
+      categoryCol,
+      effCurr,
+      dateMode,
+      competenceMonth,
+    )
+  }
+
+  // Alterna modo de datação (competência da fatura vs data original de cada transação)
+  const handleDateModeChange = (
+    newMode: 'competence' | 'original',
+    targetMonth = competenceMonth,
+  ) => {
+    setDateMode(newMode)
+    if (rawParsedRows.length > 0) {
+      const updated = recalculatePreviewDates(rawParsedRows, newMode, targetMonth, amountCurrency)
+      setPreviewList(updated)
+    }
+  }
+
+  // Altera o mês de competência escolhido
+  const handleCompetenceMonthChange = (newMonth: string) => {
+    setCompetenceMonth(newMonth)
+    if (dateMode === 'competence' && rawParsedRows.length > 0) {
+      const updated = recalculatePreviewDates(rawParsedRows, 'competence', newMonth, amountCurrency)
+      setPreviewList(updated)
+    }
   }
 
   // Safety check on preview items: warns if suspiciously binary, unreadable or 100% 0 with identical date
@@ -700,6 +831,46 @@ export default function TransactionsView() {
     setSelectedTxIds([])
   }
 
+  // Ação em lote: realocar mês/competência dos lançamentos selecionados
+  const handleOpenBatchRelocate = () => {
+    if (selectedTxIds.length === 0) return
+    // Tenta sugerir o mês da primeira transação selecionada ou filterMonth ou setembro
+    const firstSelected = transactions.find((t) => selectedTxIds.includes(t.id))
+    const suggestedMonth = firstSelected?.month || (filterMonth !== 'all' ? filterMonth : '2026-09')
+    setBatchTargetMonth(suggestedMonth)
+    setShowBatchMonthModal(true)
+  }
+
+  const handleConfirmBatchRelocate = async () => {
+    if (selectedTxIds.length === 0) return
+    try {
+      setIsRelocatingBatch(true)
+      const res = await updateTransactionsMonthBatch(
+        selectedTxIds,
+        batchTargetMonth,
+        batchAdjustDates,
+      )
+      toast({
+        title: 'Competência realocada com sucesso!',
+        description: `${res.updatedCount} lançamento(s) movidos para o mês ${formatMonthShort(
+          batchTargetMonth,
+        )}.`,
+      })
+      setShowBatchMonthModal(false)
+      setSelectedTxIds([])
+      loadTransactionsList()
+    } catch (err: any) {
+      console.error('Erro ao realocar em lote:', err)
+      toast({
+        title: 'Falha ao realocar competência',
+        description: err.message || 'Ocorreu um erro ao atualizar os lançamentos.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsRelocatingBatch(false)
+    }
+  }
+
   const handleDeleteBatch = async () => {
     if (selectedTxIds.length === 0) return
     const count = selectedTxIds.length
@@ -909,16 +1080,27 @@ export default function TransactionsView() {
 
           {/* Batch Action Bar */}
           {selectedTxIds.length > 0 && (
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs animate-in fade-in slide-in-from-top-1">
+            <div className="flex flex-wrap items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs animate-in fade-in slide-in-from-top-1">
               <span className="font-semibold text-slate-700">
                 {selectedTxIds.length} selecionado{selectedTxIds.length > 1 ? 's' : ''}
               </span>
               <div className="h-4 w-px bg-slate-300 mx-1" />
               <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenBatchRelocate}
+                disabled={isDeletingBatch || isRelocatingBatch}
+                className="h-7 px-2.5 text-xs font-semibold gap-1.5 bg-white border-blue-200 text-blue-700 hover:bg-blue-50 shadow-2xs"
+                title="Mudar o mês de competência das transações selecionadas (ex: mover compras de agosto para setembro)"
+              >
+                <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                Realocar para o mês...
+              </Button>
+              <Button
                 variant="destructive"
                 size="sm"
                 onClick={handleDeleteBatch}
-                disabled={isDeletingBatch}
+                disabled={isDeletingBatch || isRelocatingBatch}
                 className="h-7 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs"
               >
                 {isDeletingBatch ? (
@@ -932,7 +1114,7 @@ export default function TransactionsView() {
                 variant="ghost"
                 size="sm"
                 onClick={handleClearSelection}
-                disabled={isDeletingBatch}
+                disabled={isDeletingBatch || isRelocatingBatch}
                 className="h-7 px-2 text-xs text-slate-600 hover:text-slate-900 gap-1"
                 title="Limpar seleção"
               >
@@ -1139,11 +1321,19 @@ export default function TransactionsView() {
                 <span>
                   Arquivo: <strong>{pdfMeta.fileName}</strong> ({pdfMeta.totalPages} página(s))
                   {pdfMeta.year && ` • Ano: ${pdfMeta.year}`}
+                  {pdfMeta.detectedPeriodLabel && (
+                    <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-blue-100 text-blue-800 font-medium">
+                      Período: {pdfMeta.detectedPeriodLabel}
+                    </span>
+                  )}
+                  {pdfMeta.detectedDueDate && (
+                    <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-slate-100 text-slate-700 font-medium">
+                      Vencimento: {pdfMeta.detectedDueDate}
+                    </span>
+                  )}
                 </span>
                 <div className="inline-flex items-center gap-1.5 ml-2 bg-white px-2 py-1 rounded-md border border-slate-300">
-                  <span className="text-[11px] font-semibold text-slate-700">
-                    Moeda do extrato:
-                  </span>
+                  <span className="text-[11px] font-semibold text-slate-700">Moeda:</span>
                   <div className="inline-flex rounded border border-slate-200 bg-slate-100 p-0.5">
                     <button
                       type="button"
@@ -1173,11 +1363,6 @@ export default function TransactionsView() {
                 </div>
               </div>
               <div className="flex items-center gap-3 text-[11px]">
-                <span className="text-[10px] text-slate-500">
-                  {amountCurrency === 'EUR'
-                    ? 'Convertido pela taxa do mês'
-                    : 'Gravado em R$ sem conversão'}
-                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -1193,6 +1378,126 @@ export default function TransactionsView() {
               </div>
             </div>
           )}
+
+          {/* Seletor de Competência da Fatura / Modo de Datação */}
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="h-4 w-4 text-blue-600 shrink-0" />
+                <span className="font-semibold text-slate-800 text-xs">
+                  Competência dos Lançamentos (Mês da Fatura)
+                </span>
+                {pdfMeta?.isCreditCardInvoice && (
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-[10px] py-0">
+                    Fatura de Cartão Detectada
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Evita que compras do início do ciclo caiam no mês anterior já encerrado.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              {/* Opção B: Atribuir todos ao mês da fatura (recomendada) */}
+              <div
+                onClick={() => handleDateModeChange('competence')}
+                className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                  dateMode === 'competence'
+                    ? 'bg-blue-50/70 border-blue-500 shadow-2xs ring-1 ring-blue-500'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="dateMode"
+                    id="dateModeCompetence"
+                    checked={dateMode === 'competence'}
+                    onChange={() => handleDateModeChange('competence')}
+                    className="mt-0.5 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <label
+                      htmlFor="dateModeCompetence"
+                      className="font-semibold text-slate-900 cursor-pointer block text-xs"
+                    >
+                      Considerar todos os gastos no mês de competência da fatura (Recomendado)
+                    </label>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Compras feitas no fim do mês anterior (ex: 31 AGO numa fatura fechada em SET)
+                      serão contabilizadas integralmente no orçamento do mês da fatura.
+                    </p>
+
+                    {dateMode === 'competence' && (
+                      <div className="mt-2.5 flex items-center gap-2 pt-2 border-t border-blue-100">
+                        <Label
+                          htmlFor="competenceSelect"
+                          className="text-[11px] font-semibold text-blue-900 whitespace-nowrap"
+                        >
+                          Mês da fatura:
+                        </Label>
+                        <Select
+                          value={competenceMonth}
+                          onValueChange={(val) => handleCompetenceMonthChange(val)}
+                        >
+                          <SelectTrigger
+                            id="competenceSelect"
+                            className="h-7 text-xs bg-white border-blue-300 w-44"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableMonths.map((m) => (
+                              <SelectItem key={m} value={m}>
+                                {formatMonthShort(m)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-[10px] text-blue-700 font-medium">
+                          {previewList.length} lançamento(s) em {formatMonthShort(competenceMonth)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Opção A: Data original de cada compra */}
+              <div
+                onClick={() => handleDateModeChange('original')}
+                className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                  dateMode === 'original'
+                    ? 'bg-blue-50/70 border-blue-500 shadow-2xs ring-1 ring-blue-500'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="dateMode"
+                    id="dateModeOriginal"
+                    checked={dateMode === 'original'}
+                    onChange={() => handleDateModeChange('original')}
+                    className="mt-0.5 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <label
+                      htmlFor="dateModeOriginal"
+                      className="font-semibold text-slate-900 cursor-pointer block text-xs"
+                    >
+                      Datar pela data original de cada transação
+                    </label>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Cada gasto cai no dia exato em que ocorreu. Se o ciclo começou no mês
+                      anterior, essas saídas cairão no mês passado.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Banner de alerta caso preview contenha anomalias ou dados binários */}
           {previewSanityAlert && (
@@ -1612,6 +1917,90 @@ export default function TransactionsView() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* REALOCAR COMPETÊNCIA EM LOTE MODAL */}
+      <Dialog open={showBatchMonthModal} onOpenChange={setShowBatchMonthModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-blue-600" />
+              Realocar Competência em Lote
+            </DialogTitle>
+            <DialogDescription>
+              Altere o mês de competência dos {selectedTxIds.length} lançamento(s) selecionados.
+              Útil para corrigir compras importadas na data original que deveriam pertencer à fatura
+              do mês seguinte.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="target-batch-month" className="text-xs font-semibold text-slate-700">
+                Novo Mês de Competência
+              </Label>
+              <Select value={batchTargetMonth} onValueChange={setBatchTargetMonth}>
+                <SelectTrigger id="target-batch-month" className="text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableMonths.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {formatMonthShort(m)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-start gap-2.5 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <Checkbox
+                id="adjust-batch-dates"
+                checked={batchAdjustDates}
+                onCheckedChange={(checked) => setBatchAdjustDates(checked === true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <Label
+                  htmlFor="adjust-batch-dates"
+                  className="text-xs font-semibold text-slate-800 cursor-pointer block"
+                >
+                  Ajustar a data dos registros para o novo mês
+                </Label>
+                <p className="text-[11px] text-slate-500">
+                  Mantém o dia da compra (ex: dia 31 vira 30 em setembro) e atualiza o ano/mês para
+                  que filtros por data e relatórios fiquem 100% alinhados no mês escolhido.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowBatchMonthModal(false)}
+              disabled={isRelocatingBatch}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmBatchRelocate}
+              disabled={isRelocatingBatch}
+              className="bg-blue-600 hover:bg-blue-700 font-semibold gap-1.5 shadow-xs"
+            >
+              {isRelocatingBatch ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Realocando...
+                </>
+              ) : (
+                `Mover para ${formatMonthShort(batchTargetMonth)}`
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -337,6 +337,59 @@ export async function updateTransaction(
   return await pb.collection('transactions').update<Transaction>(id, data)
 }
 
+/**
+ * Atualiza em lote a competência/mês de uma lista de transações existentes.
+ * Se adjustDate = true, também ajusta o campo date mantendo o dia quando possível ou limitando ao último dia do mês.
+ */
+export async function updateTransactionsMonthBatch(
+  txIds: string[],
+  targetMonth: string, // YYYY-MM
+  adjustDate = true,
+): Promise<{ updatedCount: number; errors: string[] }> {
+  const userId = pb.authStore.record?.id
+  if (!userId) throw new Error('Usuário não autenticado')
+
+  let updatedCount = 0
+  const errors: string[] = []
+
+  const [tYearStr, tMonthStr] = targetMonth.split('-')
+  const targetYear = parseInt(tYearStr, 10)
+  const targetMonthNum = parseInt(tMonthStr, 10)
+  const maxDayInTargetMonth = new Date(targetYear, targetMonthNum, 0).getDate()
+
+  for (const id of txIds) {
+    try {
+      // Obter registro atual se precisamos ajustar a data
+      let newDate: string | undefined
+      if (adjustDate) {
+        try {
+          const current = await pb.collection('transactions').getOne<Transaction>(id)
+          if (current.date) {
+            const rawDay = parseInt(current.date.slice(8, 10), 10) || 1
+            const clampedDay = Math.min(Math.max(1, rawDay), maxDayInTargetMonth)
+            newDate = `${targetMonth}-${String(clampedDay).padStart(2, '0')}`
+          } else {
+            newDate = `${targetMonth}-01`
+          }
+        } catch {
+          newDate = `${targetMonth}-01`
+        }
+      }
+
+      await pb.collection('transactions').update<Transaction>(id, {
+        month: targetMonth,
+        ...(newDate ? { date: newDate } : {}),
+      })
+      updatedCount++
+    } catch (e: any) {
+      console.error(`Erro ao realocar lançamento ${id} para ${targetMonth}:`, e)
+      errors.push(e?.message || `Falha no id ${id}`)
+    }
+  }
+
+  return { updatedCount, errors }
+}
+
 export async function deleteTransaction(id: string): Promise<void> {
   await pb.collection('transactions').delete(id)
 }
