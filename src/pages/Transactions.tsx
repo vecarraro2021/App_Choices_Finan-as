@@ -71,6 +71,7 @@ import {
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { useSearchParams } from 'react-router-dom'
+import { InvoiceCompetenceInfoBanner } from '@/components/InvoiceCompetenceInfoBanner'
 
 interface PreviewTransaction {
   id: string
@@ -952,6 +953,9 @@ export default function TransactionsView() {
           />
         </div>
       </div>
+
+      {/* Banner Informativo sobre Competência da Fatura */}
+      <InvoiceCompetenceInfoBanner />
 
       {/* Standard Statement Importer Dropzone (CSV, XLSX, PDF) */}
       <div
