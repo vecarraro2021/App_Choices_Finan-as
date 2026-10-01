@@ -7,11 +7,103 @@ export interface ParsedRow {
   [key: string]: string
 }
 
+export interface CurrencyDetectionResult {
+  currency: 'BRL' | 'EUR'
+  confidence: 'high' | 'medium' | 'fallback'
+  reason?: string
+}
+
 export interface ParseFileResult {
   headers: string[]
   rows: ParsedRow[]
   sourceType: 'csv' | 'xlsx'
   sheetNames?: string[]
+  detectedCurrency?: 'BRL' | 'EUR'
+  currencyConfidence?: 'high' | 'medium' | 'fallback'
+  currencyReason?: string
+}
+
+/**
+ * Detecta moeda em linhas e colunas de CSV/XLSX:
+ * 1. Procura símbolos e códigos nos cabeçalhos (ex: "Valor (R$)", "Quantia (€)", "Amount BRL", "EUR")
+ * 2. Procura símbolos nas células de valor (R$, €, EUR, BRL)
+ * 3. Analisa formatação numérica (vírgula decimal BR/PT vs ponto decimal) e palavras-chave de banco
+ * 4. Retorna fallback para moeda padrão do usuário se ambíguo
+ */
+export function detectTableCurrency(
+  headers: string[],
+  rows: ParsedRow[],
+  userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
+): CurrencyDetectionResult {
+  let euroScore = 0
+  let realScore = 0
+
+  // 1. Cabeçalhos
+  const headerText = headers.join(' ').toLowerCase()
+  if (/r\$|\bbrl\b|\breais\b/.test(headerText)) realScore += 5
+  if (/€|\beur\b|\beuros?\b/.test(headerText)) euroScore += 5
+
+  // 2. Amostra de linhas (até 60 linhas)
+  const sample = rows.slice(0, 60)
+  let euroSymbolCount = 0
+  let realSymbolCount = 0
+  let commaDecimalCount = 0
+  let pointDecimalCount = 0
+
+  for (const row of sample) {
+    const joined = Object.values(row).join(' ')
+    if (joined.includes('€') || /\beur\b/i.test(joined)) {
+      euroSymbolCount++
+    }
+    if (joined.includes('R$') || /\bbrl\b/i.test(joined)) {
+      realSymbolCount++
+    }
+
+    // Procurar colunas com números para checar formato decimal
+    for (const val of Object.values(row)) {
+      const str = String(val).trim()
+      if (/^[+-]?(?:R\$|€|EUR|BRL)?\s*\d{1,3}(?:\.\d{3})*,\d{2}$/i.test(str)) {
+        commaDecimalCount++
+      } else if (/^[+-]?(?:R\$|€|EUR|BRL)?\s*\d{1,3}(?:,\d{3})*\.\d{2}$/i.test(str)) {
+        pointDecimalCount++
+      }
+    }
+  }
+
+  realScore += realSymbolCount * 4
+  euroScore += euroSymbolCount * 4
+
+  // Se houver indicação clara de símbolo
+  if (realScore > 0 && realScore > euroScore) {
+    return {
+      currency: 'BRL',
+      confidence: realScore >= 5 ? 'high' : 'medium',
+      reason:
+        realSymbolCount > 0
+          ? 'Identificado símbolo R$ / BRL nos valores'
+          : 'Identificado cabeçalho em R$ / BRL',
+    }
+  }
+
+  if (euroScore > 0 && euroScore > realScore) {
+    return {
+      currency: 'EUR',
+      confidence: euroScore >= 5 ? 'high' : 'medium',
+      reason:
+        euroSymbolCount > 0
+          ? 'Identificado símbolo € / EUR nos valores'
+          : 'Identificado cabeçalho em € / EUR',
+    }
+  }
+
+  // Se nenhum símbolo monetário explícito apareceu nas colunas
+  // mas o formato é predominantemente vírgula decimal sem símbolo ou ponto decimal,
+  // ainda não temos certeza se vírgula é PT (EUR) ou BR (BRL). Portanto consideramos ambíguo:
+  return {
+    currency: userDefaultCurrency,
+    confidence: 'fallback',
+    reason: 'Moeda não identificada no arquivo, usando sua moeda padrão',
+  }
 }
 
 /**
@@ -350,6 +442,7 @@ export async function parseXLSXBuffer(
 export async function parseStatementFile(
   file: File,
   fallbackXlsxViaBackend?: (f: File) => Promise<string>,
+  userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
 ): Promise<ParseFileResult> {
   const fileName = file.name.toLowerCase()
   const isExtensionExcel =
@@ -376,11 +469,15 @@ export async function parseStatementFile(
       const fullBuffer = await file.arrayBuffer()
       const result = await parseXLSXBuffer(fullBuffer)
       if (result.rows.length > 0) {
+        const currDet = detectTableCurrency(result.headers, result.rows, userDefaultCurrency)
         return {
           headers: result.headers,
           rows: result.rows,
           sourceType: 'xlsx',
           sheetNames: result.sheetNames,
+          detectedCurrency: currDet.currency,
+          currencyConfidence: currDet.confidence,
+          currencyReason: currDet.reason,
         }
       }
     } catch (xlsxErr) {
@@ -390,10 +487,18 @@ export async function parseStatementFile(
         try {
           const markdown = await fallbackXlsxViaBackend(file)
           const csvResult = parseCSV(markdown)
+          const currDet = detectTableCurrency(
+            csvResult.headers,
+            csvResult.rows,
+            userDefaultCurrency,
+          )
           return {
             headers: csvResult.headers,
             rows: csvResult.rows,
             sourceType: 'xlsx',
+            detectedCurrency: currDet.currency,
+            currencyConfidence: currDet.confidence,
+            currencyReason: currDet.reason,
           }
         } catch (backendErr) {
           console.error('[parseStatementFile] Falha no fallback do backend:', backendErr)
@@ -422,11 +527,15 @@ export async function parseStatementFile(
       const fullBuffer = await file.arrayBuffer()
       const result = await parseXLSXBuffer(fullBuffer)
       if (result.rows.length > 0) {
+        const currDet = detectTableCurrency(result.headers, result.rows, userDefaultCurrency)
         return {
           headers: result.headers,
           rows: result.rows,
           sourceType: 'xlsx',
           sheetNames: result.sheetNames,
+          detectedCurrency: currDet.currency,
+          currencyConfidence: currDet.confidence,
+          currencyReason: currDet.reason,
         }
       }
     } catch (retryErr) {
@@ -435,10 +544,18 @@ export async function parseStatementFile(
         try {
           const markdown = await fallbackXlsxViaBackend(file)
           const csvResult = parseCSV(markdown)
+          const currDet = detectTableCurrency(
+            csvResult.headers,
+            csvResult.rows,
+            userDefaultCurrency,
+          )
           return {
             headers: csvResult.headers,
             rows: csvResult.rows,
             sourceType: 'xlsx',
+            detectedCurrency: currDet.currency,
+            currencyConfidence: currDet.confidence,
+            currencyReason: currDet.reason,
           }
         } catch (bErr) {
           console.error('[parseStatementFile] Falha no fallback do backend:', bErr)
@@ -452,9 +569,13 @@ export async function parseStatementFile(
 
   // Standard CSV parse
   const parsed = parseCSV(text)
+  const currDet = detectTableCurrency(parsed.headers, parsed.rows, userDefaultCurrency)
   return {
     headers: parsed.headers,
     rows: parsed.rows,
     sourceType: 'csv',
+    detectedCurrency: currDet.currency,
+    currencyConfidence: currDet.confidence,
+    currencyReason: currDet.reason,
   }
 }

@@ -9,6 +9,7 @@ import {
   validatePreviewSanity,
   parseXLSXBuffer,
   parseStatementFile,
+  detectTableCurrency,
 } from './fileParser'
 
 describe('fileParser detection & sanity', () => {
@@ -103,6 +104,26 @@ describe('fileParser detection & sanity', () => {
     expect(parseAmount('-50,00')).toBe(50.0)
     expect(parseAmount('0,00')).toBe(0)
     expect(parseAmount(undefined)).toBe(0)
+  })
+
+  it('detectTableCurrency detecta moeda R$ ou EUR por cabeçalhos e valores', () => {
+    const csvBrl = 'Data;Descricao;Valor (R$)\n01/01/2026;Teste;150,00'
+    const parsedBrl = parseCSV(csvBrl)
+    const resBrl = detectTableCurrency(parsedBrl.headers, parsedBrl.rows, 'EUR')
+    expect(resBrl.currency).toBe('BRL')
+    expect(resBrl.confidence).toBe('high')
+
+    const csvEur = 'Date,Description,Amount\n2026-01-01,Test,€ 45.20'
+    const parsedEur = parseCSV(csvEur)
+    const resEur = detectTableCurrency(parsedEur.headers, parsedEur.rows, 'BRL')
+    expect(resEur.currency).toBe('EUR')
+    expect(resEur.confidence).toBe('high')
+
+    const csvGeneric = 'Date,Description,Amount\n2026-01-01,Generic,100'
+    const parsedGeneric = parseCSV(csvGeneric)
+    const resFallback = detectTableCurrency(parsedGeneric.headers, parsedGeneric.rows, 'BRL')
+    expect(resFallback.currency).toBe('BRL')
+    expect(resFallback.confidence).toBe('fallback')
   })
 
   it('normalizeDate normaliza diferentes formatos para YYYY-MM-DD', () => {

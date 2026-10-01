@@ -32,10 +32,10 @@ describe('inferInvoiceCompetence', () => {
 describe('parsePDFStatement', () => {
   it('deve extrair transações em formato brasileiro padrão (DD/MM/YYYY e valor 1.234,56)', () => {
     const lines = [
-      'Extrato de Conta Corrente - Banco Exemplo',
+      'Extrato de Conta Corrente - Banco Nubank S.A.',
       'Data Lançamento Valor',
-      '05/03/2026 SUPERMERCADO ABC 150,50',
-      '10/03/2026 POSTO IPIRANGA 220,00',
+      '05/03/2026 SUPERMERCADO ABC R$ 150,50',
+      '10/03/2026 POSTO IPIRANGA R$ 220,00',
       'Saldo Parcial: 3.500,00',
     ]
     const fullText = lines.join('\n')
@@ -153,7 +153,7 @@ describe('parsePDFStatement', () => {
     expect(result.reason).toContain('Não foi possível identificar transações')
   })
 
-  it('identifica fatura Nubank com competência de setembro mesmo com compras iniciadas em agosto', () => {
+  it('identifica fatura Nubank com competência de setembro mesmo com compras iniciadas em agosto e moeda BRL', () => {
     const lines = [
       'Olá, Verônica.',
       'Esta é a sua fatura de outubro, no valor de R$ 2.499,33',
@@ -172,6 +172,16 @@ describe('parsePDFStatement', () => {
     expect(result.detectedCompetenceMonth).toBe('2026-09')
     expect(result.detectedPeriodLabel).toBe('31 AGO a 30 SET')
     expect(result.detectedDueDate).toBe('07 OUT 2026')
+    expect(result.detectedCurrency).toBe('BRL')
+    expect(result.currencyConfidence).toBe('high')
     expect(result.transactions.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('deve usar a moeda padrão do usuário quando o PDF não tiver pistas de moeda', () => {
+    const lines = ['Relatório de Transações Financeiras', '10/05/2026 COMPRA DIVERSA 50.00']
+    const fullText = lines.join('\n')
+    const result = parsePDFStatement(lines, fullText, 2026, 'EUR')
+    expect(result.detectedCurrency).toBe('EUR')
+    expect(result.currencyConfidence).toBe('fallback')
   })
 })

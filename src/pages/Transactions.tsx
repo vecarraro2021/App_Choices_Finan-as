@@ -127,6 +127,18 @@ export default function TransactionsView() {
   const [categoryCol, setCategoryCol] = useState('')
   const [importFileType, setImportFileType] = useState<'csv' | 'pdf'>('csv')
   const [isProcessingFile, setIsProcessingFile] = useState(false)
+  const [importStep, setImportStep] = useState<1 | 2>(1)
+  const [currencyMeta, setCurrencyMeta] = useState<{
+    detectedCurrency: 'BRL' | 'EUR'
+    confidence: 'high' | 'medium' | 'fallback'
+    reason?: string
+    isManualOverride?: boolean
+  }>({
+    detectedCurrency: 'BRL',
+    confidence: 'fallback',
+  })
+  const [showCurrencyOverrideSelect, setShowCurrencyOverrideSelect] = useState(false)
+  const [uploadedFileName, setUploadedFileName] = useState('')
   const [pdfMeta, setPdfMeta] = useState<{
     fileName: string
     currency: 'BRL' | 'EUR'
@@ -270,11 +282,22 @@ export default function TransactionsView() {
       }
 
       setImportFileType('pdf')
-      const initialPdfCurrency = parseResult.detectedCurrency || 'EUR'
-      setAmountCurrency(initialPdfCurrency)
+      setUploadedFileName(file.name)
+      setImportStep(1)
+      setShowCurrencyOverrideSelect(false)
+
+      const detectedCurr = parseResult.detectedCurrency || currency || 'BRL'
+      setAmountCurrency(detectedCurr)
+      setCurrencyMeta({
+        detectedCurrency: detectedCurr,
+        confidence: parseResult.currencyConfidence || 'high',
+        reason: parseResult.currencyReason,
+        isManualOverride: false,
+      })
+
       setPdfMeta({
         fileName: file.name,
-        currency: initialPdfCurrency,
+        currency: detectedCurr,
         year: parseResult.detectedYear,
         totalPages: extracted.totalPages,
         detectedCompetenceMonth: parseResult.detectedCompetenceMonth,
@@ -303,7 +326,7 @@ export default function TransactionsView() {
           description: tx.description,
           amount: tx.amount,
           rawAmount: tx.amount,
-          currency: initialPdfCurrency,
+          currency: detectedCurr,
           category: matchResult.categoryId || undefined,
           month: tx.month,
         }
@@ -324,7 +347,7 @@ export default function TransactionsView() {
 
         const rateUsed = getRateForMonth(effectiveMonth, exchangeRates)
         let amountBrl = raw.amount
-        if (initialPdfCurrency === 'EUR') {
+        if (detectedCurr === 'EUR') {
           amountBrl = Math.round(raw.amount * rateUsed * 100) / 100
         }
 
@@ -335,7 +358,7 @@ export default function TransactionsView() {
           description: raw.description,
           amount: amountBrl,
           originalAmount: raw.amount,
-          originalCurrency: initialPdfCurrency,
+          originalCurrency: detectedCurr,
           category: raw.category,
           month: effectiveMonth,
           selected: true,
@@ -379,10 +402,13 @@ export default function TransactionsView() {
     try {
       setIsProcessingFile(true)
       setImportFileType('csv')
+      setUploadedFileName(file.name)
+      setImportStep(1)
+      setShowCurrencyOverrideSelect(false)
       setPdfMeta(null)
 
       // Parse using parseStatementFile which checks magic bytes, handles binary abort, and supports XLSX
-      const parsed = await parseStatementFile(file, convertSheetToMarkdown)
+      const parsed = await parseStatementFile(file, convertSheetToMarkdown, currency || 'BRL')
 
       if (parsed.headers.length === 0 || parsed.rows.length === 0) {
         toast({
@@ -438,10 +464,24 @@ export default function TransactionsView() {
       setDateCol(detectedDate)
       setDescCol(detectedDesc)
       setAmountCol(detectedAmount)
-      setAmountCurrency('EUR') // padrão EUR conforme especificação
+      const detectedCurr = parsed.detectedCurrency || currency || 'BRL'
+      setAmountCurrency(detectedCurr)
+      setCurrencyMeta({
+        detectedCurrency: detectedCurr,
+        confidence: parsed.currencyConfidence || 'high',
+        reason: parsed.currencyReason,
+        isManualOverride: false,
+      })
       setCategoryCol(detectedCat)
 
-      buildPreview(parsed.rows, detectedDate, detectedDesc, detectedAmount, detectedCat, 'EUR')
+      buildPreview(
+        parsed.rows,
+        detectedDate,
+        detectedDesc,
+        detectedAmount,
+        detectedCat,
+        detectedCurr,
+      )
       setShowPreviewDialog(true)
 
       if (parsed.sourceType === 'xlsx') {
@@ -555,12 +595,28 @@ export default function TransactionsView() {
     setPreviewList(preview)
   }
 
-  // Re-build preview when user changes currency in PDF mode
-  const handlePdfCurrencyChange = (newCurr: 'EUR' | 'BRL') => {
+  // Alteração manual da moeda das transações (fallback discreto)
+  const handleApplyCurrencyOverride = (newCurr: 'EUR' | 'BRL') => {
     setAmountCurrency(newCurr)
+    setCurrencyMeta((prev) => ({
+      ...prev,
+      detectedCurrency: newCurr,
+      isManualOverride: true,
+      reason: 'Ajustado manualmente pelo usuário',
+    }))
     if (pdfMeta) {
       setPdfMeta({ ...pdfMeta, currency: newCurr })
     }
+
+    // Atualiza rawParsedRows com a nova moeda
+    setRawParsedRows((prev) =>
+      prev.map((r) => ({
+        ...r,
+        currency: newCurr,
+      })),
+    )
+
+    // Atualiza previewList com conversão cambial se necessário
     setPreviewList((prev) =>
       prev.map((item) => {
         const rawAmt = item.originalAmount !== undefined ? item.originalAmount : item.amount
@@ -1300,154 +1356,247 @@ export default function TransactionsView() {
         </CardContent>
       </Card>
 
-      {/* IMPORT PREVIEW & COLUMN MAPPING MODAL */}
+      {/* IMPORT PREVIEW & COLUMN MAPPING MODAL (2 ETAPAS) */}
       <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
-        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-blue-600" />
-              {importFileType === 'pdf'
-                ? 'Revisão do Extrato PDF Extraído'
-                : 'Mapeamento de Colunas e Pré-visualização'}
-            </DialogTitle>
-            <DialogDescription>
-              {importFileType === 'pdf'
-                ? 'Revise os lançamentos identificados no PDF, ajuste categorias e desmarque os que não desejar incluir.'
-                : 'Confirme qual coluna corresponde a cada dado e revise as categorias sugeridas antes de salvar.'}
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-5 sm:p-6">
+          <DialogHeader className="pb-3 border-b border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <DialogTitle className="flex items-center gap-2 text-lg">
+                <Sparkles className="h-5 w-5 text-blue-600" />
+                {importFileType === 'pdf'
+                  ? 'Importação de Extrato / Fatura PDF'
+                  : 'Importação de Planilha / Extrato'}
+              </DialogTitle>
+
+              {/* Stepper Indicator */}
+              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg self-start sm:self-auto">
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                    importStep === 1
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  onClick={() => setImportStep(1)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <span
+                    className={`h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      importStep === 1 ? 'bg-blue-600 text-white' : 'bg-emerald-600 text-white'
+                    }`}
+                  >
+                    {importStep > 1 ? '✓' : '1'}
+                  </span>
+                  <span>1. Competência</span>
+                </div>
+
+                <span className="text-slate-300 text-xs">›</span>
+
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                    importStep === 2 ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-400'
+                  }`}
+                  onClick={() => setImportStep(2)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <span
+                    className={`h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      importStep === 2 ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-700'
+                    }`}
+                  >
+                    2
+                  </span>
+                  <span>2. Gastos e Categorias</span>
+                </div>
+              </div>
+            </div>
+
+            <DialogDescription className="text-xs text-slate-500 mt-1">
+              {importStep === 1
+                ? 'Etapa 1 de 2: Defina como o sistema deve alocar os meses das compras e confira a moeda identificada.'
+                : 'Etapa 2 de 2: Revise os lançamentos encontrados, confirme as categorias sugeridas e importe.'}
             </DialogDescription>
           </DialogHeader>
 
-          {/* Banner específico para importação de PDF com seletor de moeda */}
-          {importFileType === 'pdf' && pdfMeta && (
-            <div className="p-3 bg-blue-50/80 rounded-lg border border-blue-200 text-xs text-blue-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+          {/* Banner de informações do arquivo e Badge de Moeda Detectada com Fallback Discreto */}
+          <div className="py-2.5 px-3.5 bg-slate-50/90 rounded-lg border border-slate-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <FileText className="h-4 w-4 text-slate-500 shrink-0" />
+              <span className="text-slate-700">
+                Arquivo: <strong>{uploadedFileName || pdfMeta?.fileName || 'Extrato'}</strong>
+                {pdfMeta?.totalPages ? ` (${pdfMeta.totalPages} pág.)` : ''}
+                {pdfMeta?.detectedPeriodLabel && (
+                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-800 font-medium">
+                    Ciclo: {pdfMeta.detectedPeriodLabel}
+                  </span>
+                )}
+                {pdfMeta?.detectedDueDate && (
+                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-slate-200/80 text-slate-700 font-medium">
+                    Venc.: {pdfMeta.detectedDueDate}
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {/* Badge de Moeda Detectada (sem seletor proeminente) */}
+            <div className="flex items-center gap-2">
+              <div
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                  currencyMeta.confidence === 'fallback'
+                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                }`}
+                title={currencyMeta.reason || `Moeda inferida automaticamente: ${amountCurrency}`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
                 <span>
-                  Arquivo: <strong>{pdfMeta.fileName}</strong> ({pdfMeta.totalPages} página(s))
-                  {pdfMeta.year && ` • Ano: ${pdfMeta.year}`}
-                  {pdfMeta.detectedPeriodLabel && (
-                    <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-blue-100 text-blue-800 font-medium">
-                      Período: {pdfMeta.detectedPeriodLabel}
-                    </span>
-                  )}
-                  {pdfMeta.detectedDueDate && (
-                    <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-slate-100 text-slate-700 font-medium">
-                      Vencimento: {pdfMeta.detectedDueDate}
-                    </span>
-                  )}
+                  Moeda detectada:{' '}
+                  <strong>
+                    {amountCurrency} ({amountCurrency === 'EUR' ? '€' : 'R$'})
+                  </strong>
                 </span>
-                <div className="inline-flex items-center gap-1.5 ml-2 bg-white px-2 py-1 rounded-md border border-slate-300">
-                  <span className="text-[11px] font-semibold text-slate-700">Moeda:</span>
-                  <div className="inline-flex rounded border border-slate-200 bg-slate-100 p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handlePdfCurrencyChange('EUR')}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded ${
-                        amountCurrency === 'EUR'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                      title="Valores em Euro: serão convertidos para Real pela taxa média do mês"
-                    >
-                      € EUR
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePdfCurrencyChange('BRL')}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded ${
-                        amountCurrency === 'BRL'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                      title="Valores em Reais: salvos sem conversão cambial"
-                    >
-                      R$ BRL
-                    </button>
-                  </div>
-                </div>
+                {currencyMeta.confidence === 'fallback' && (
+                  <span className="text-[10px] text-amber-700 font-normal">(padrão)</span>
+                )}
               </div>
-              <div className="flex items-center gap-3 text-[11px]">
+
+              {/* Fallback discreto */}
+              {!showCurrencyOverrideSelect ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const allSelected = previewList.every((it) => it.selected !== false)
-                    setPreviewList(previewList.map((it) => ({ ...it, selected: !allSelected })))
-                  }}
-                  className="font-semibold text-blue-700 hover:underline"
+                  onClick={() => setShowCurrencyOverrideSelect(true)}
+                  className="text-[11px] text-slate-500 hover:text-blue-600 underline underline-offset-2 ml-1"
                 >
-                  {previewList.every((it) => it.selected !== false)
-                    ? 'Desmarcar todos'
-                    : 'Marcar todos'}
+                  não é esta a moeda?
                 </button>
+              ) : (
+                <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded px-1.5 py-0.5 shadow-2xs">
+                  <span className="text-[10px] text-slate-500">Mudar para:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleApplyCurrencyOverride('BRL')
+                      setShowCurrencyOverrideSelect(false)
+                    }}
+                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                      amountCurrency === 'BRL'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    R$ BRL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleApplyCurrencyOverride('EUR')
+                      setShowCurrencyOverrideSelect(false)
+                    }}
+                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                      amountCurrency === 'EUR'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    € EUR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrencyOverrideSelect(false)}
+                    className="text-slate-400 hover:text-slate-700 text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Banner de alerta de sanidade / arquivo ilegível */}
+          {previewSanityAlert && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-semibold block">Aviso de formato ou compatibilidade:</span>
+                <p>{previewSanityAlert.message}</p>
               </div>
             </div>
           )}
 
-          {/* Seletor de Competência da Fatura / Modo de Datação */}
-          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <CalendarCheck className="h-4 w-4 text-blue-600 shrink-0" />
-                <span className="font-semibold text-slate-800 text-xs">
-                  Competência dos Lançamentos (Mês da Fatura)
-                </span>
-                {pdfMeta?.isCreditCardInvoice && (
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-[10px] py-0">
-                    Fatura de Cartão Detectada
-                  </Badge>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Evita que compras do início do ciclo caiam no mês anterior já encerrado.
-              </p>
-            </div>
+          {/* ========================================================= */}
+          {/* ETAPA 1 — COMPETÊNCIA DOS LANÇAMENTOS                    */}
+          {/* ========================================================= */}
+          {importStep === 1 && (
+            <div className="flex-1 overflow-y-auto space-y-4 py-2">
+              <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <CalendarCheck className="h-4 w-4 text-blue-600" />
+                    Como você deseja organizar a competência dos lançamentos?
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Em faturas de cartão de crédito, compras feitas nos últimos dias do mês anterior
+                    costumam constar no ciclo da fatura seguinte. Escolha onde esses gastos devem
+                    entrar no seu orçamento mensal.
+                  </p>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-              {/* Opção B: Atribuir todos ao mês da fatura (recomendada) */}
-              <div
-                onClick={() => handleDateModeChange('competence')}
-                className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                  dateMode === 'competence'
-                    ? 'bg-blue-50/70 border-blue-500 shadow-2xs ring-1 ring-blue-500'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <input
-                    type="radio"
-                    name="dateMode"
-                    id="dateModeCompetence"
-                    checked={dateMode === 'competence'}
-                    onChange={() => handleDateModeChange('competence')}
-                    className="mt-0.5 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <label
-                      htmlFor="dateModeCompetence"
-                      className="font-semibold text-slate-900 cursor-pointer block text-xs"
-                    >
-                      Considerar todos os gastos no mês de competência da fatura (Recomendado)
-                    </label>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Compras feitas no fim do mês anterior (ex: 31 AGO numa fatura fechada em SET)
-                      serão contabilizadas integralmente no orçamento do mês da fatura.
-                    </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Opção Competência da Fatura (Recomendada) */}
+                  <div
+                    onClick={() => handleDateModeChange('competence')}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                      dateMode === 'competence'
+                        ? 'border-blue-600 bg-blue-50/60 shadow-xs ring-1 ring-blue-500'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="radio"
+                            name="step1DateMode"
+                            id="step1DateModeCompetence"
+                            checked={dateMode === 'competence'}
+                            onChange={() => handleDateModeChange('competence')}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          <label
+                            htmlFor="step1DateModeCompetence"
+                            className="font-bold text-slate-900 text-xs sm:text-sm cursor-pointer"
+                          >
+                            Considerar todos os gastos no mês de competência da fatura
+                          </label>
+                        </div>
+                        <Badge className="bg-blue-600 text-white text-[10px] py-0 shrink-0">
+                          Recomendado
+                        </Badge>
+                      </div>
+
+                      <p className="text-xs text-slate-600 pl-6">
+                        Todas as transações do ciclo desta fatura serão agrupadas no orçamento do
+                        mês especificado. Compras do final do mês anterior não sujarão o mês
+                        passado.
+                      </p>
+                    </div>
 
                     {dateMode === 'competence' && (
-                      <div className="mt-2.5 flex items-center gap-2 pt-2 border-t border-blue-100">
+                      <div className="mt-4 pt-3 border-t border-blue-200 pl-6 flex flex-wrap items-center gap-2">
                         <Label
-                          htmlFor="competenceSelect"
-                          className="text-[11px] font-semibold text-blue-900 whitespace-nowrap"
+                          htmlFor="step1CompetenceSelect"
+                          className="text-xs font-semibold text-blue-900"
                         >
-                          Mês da fatura:
+                          Mês de Competência da Fatura:
                         </Label>
                         <Select
                           value={competenceMonth}
                           onValueChange={(val) => handleCompetenceMonthChange(val)}
                         >
                           <SelectTrigger
-                            id="competenceSelect"
-                            className="h-7 text-xs bg-white border-blue-300 w-44"
+                            id="step1CompetenceSelect"
+                            className="h-8 text-xs bg-white border-blue-300 w-44"
                           >
                             <SelectValue />
                           </SelectTrigger>
@@ -1459,393 +1608,391 @@ export default function TransactionsView() {
                             ))}
                           </SelectContent>
                         </Select>
-                        <span className="text-[10px] text-blue-700 font-medium">
-                          {previewList.length} lançamento(s) em {formatMonthShort(competenceMonth)}
+                        <span className="text-[11px] text-blue-700 font-medium ml-1">
+                          ({previewList.length} compras cairão em{' '}
+                          {formatMonthShort(competenceMonth)})
                         </span>
                       </div>
                     )}
                   </div>
-                </div>
-              </div>
 
-              {/* Opção A: Data original de cada compra */}
-              <div
-                onClick={() => handleDateModeChange('original')}
-                className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                  dateMode === 'original'
-                    ? 'bg-blue-50/70 border-blue-500 shadow-2xs ring-1 ring-blue-500'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <input
-                    type="radio"
-                    name="dateMode"
-                    id="dateModeOriginal"
-                    checked={dateMode === 'original'}
-                    onChange={() => handleDateModeChange('original')}
-                    className="mt-0.5 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <label
-                      htmlFor="dateModeOriginal"
-                      className="font-semibold text-slate-900 cursor-pointer block text-xs"
-                    >
-                      Datar pela data original de cada transação
-                    </label>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Cada gasto cai no dia exato em que ocorreu. Se o ciclo começou no mês
-                      anterior, essas saídas cairão no mês passado.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Banner de alerta caso preview contenha anomalias ou dados binários */}
-          {previewSanityAlert && (
-            <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5">
-              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <span className="font-semibold block">Aviso de formato ou compatibilidade:</span>
-                <p>{previewSanityAlert.message}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Column selector form (apenas para CSV) */}
-          {importFileType === 'csv' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-              <div>
-                <Label className="text-[11px] font-semibold text-slate-600">Coluna de Data</Label>
-                <Select
-                  value={dateCol}
-                  onValueChange={(v) => {
-                    setDateCol(v)
-                  }}
-                >
-                  <SelectTrigger className="h-8 mt-1 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uploadedHeaders.map((h) => (
-                      <SelectItem key={h} value={h}>
-                        {h}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-[11px] font-semibold text-slate-600">
-                  Coluna de Descrição
-                </Label>
-                <Select
-                  value={descCol}
-                  onValueChange={(v) => {
-                    setDescCol(v)
-                  }}
-                >
-                  <SelectTrigger className="h-8 mt-1 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uploadedHeaders.map((h) => (
-                      <SelectItem key={h} value={h}>
-                        {h}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-[11px] font-semibold text-slate-600">
-                    Coluna de Valor
-                  </Label>
-                  <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAmountCurrency('EUR')
-                        handleApplyMapping('EUR')
-                      }}
-                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition-colors ${
-                        amountCurrency === 'EUR'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                      title="Moeda de origem: Euro (€). Converterá para R$ pela taxa do mês."
-                    >
-                      €
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAmountCurrency('BRL')
-                        handleApplyMapping('BRL')
-                      }}
-                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition-colors ${
-                        amountCurrency === 'BRL'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                      title="Moeda de origem: Real (R$). Grava sem conversão cambial."
-                    >
-                      R$
-                    </button>
-                  </div>
-                </div>
-                <Select
-                  value={amountCol}
-                  onValueChange={(v) => {
-                    setAmountCol(v)
-                  }}
-                >
-                  <SelectTrigger className="h-8 mt-1 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uploadedHeaders.map((h) => (
-                      <SelectItem key={h} value={h}>
-                        {h}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Moeda:{' '}
-                  <strong>
-                    {amountCurrency === 'EUR' ? '€ Euro (converte)' : 'R$ Real (direto)'}
-                  </strong>
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-[11px] font-semibold text-slate-600">
-                  Coluna de Categoria (Opcional)
-                </Label>
-                <Select
-                  value={categoryCol}
-                  onValueChange={(v) => {
-                    setCategoryCol(v)
-                  }}
-                >
-                  <SelectTrigger className="h-8 mt-1 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Auto-identificar por palavras-chave</SelectItem>
-                    {uploadedHeaders.map((h) => (
-                      <SelectItem key={h} value={h}>
-                        {h}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="col-span-2 md:col-span-4 flex justify-end mt-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={handleApplyMapping}
-                  className="text-xs h-7"
-                >
-                  Reaplicar Mapeamento
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Preview rows */}
-          <div className="flex-1 overflow-y-auto border border-slate-200 rounded-md max-h-[50vh]">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs">
-                <tr>
-                  <th className="py-2.5 px-3 w-8 text-center">
-                    <span className="sr-only">Selecionar</span>
-                  </th>
-                  <th className="py-2.5 px-3">Data</th>
-                  <th className="py-2.5 px-3">Descrição</th>
-                  <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
-                  <th className="py-2.5 px-2 text-center w-24">Moeda</th>
-                  <th className="py-2.5 px-3 text-right">Valor Final (R$ BRL)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {previewList.map((row, idx) => {
-                  const isChecked = row.selected !== false
-                  const rowCurr = row.originalCurrency || amountCurrency
-
-                  return (
-                    <tr
-                      key={row.id}
-                      className={`hover:bg-slate-50 transition-colors ${
-                        !isChecked ? 'opacity-40 bg-slate-50/50' : ''
-                      }`}
-                    >
-                      <td className="py-2.5 px-3 text-center">
+                  {/* Opção Data Original */}
+                  <div
+                    onClick={() => handleDateModeChange('original')}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                      dateMode === 'original'
+                        ? 'border-blue-600 bg-blue-50/60 shadow-xs ring-1 ring-blue-500'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2.5">
                         <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            const updated = [...previewList]
-                            updated[idx].selected = e.target.checked
-                            setPreviewList(updated)
-                          }}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          type="radio"
+                          name="step1DateMode"
+                          id="step1DateModeOriginal"
+                          checked={dateMode === 'original'}
+                          onChange={() => handleDateModeChange('original')}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                         />
-                      </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap tabular-nums font-medium text-slate-900">
-                        {row.date.split('-').reverse().join('/')}
-                      </td>
-                      <td className="py-2.5 px-3 max-w-[220px]">
-                        <div
-                          className="truncate font-medium text-slate-800"
-                          title={row.description}
+                        <label
+                          htmlFor="step1DateModeOriginal"
+                          className="font-bold text-slate-900 text-xs sm:text-sm cursor-pointer"
                         >
-                          {row.description}
-                        </div>
-                      </td>
+                          Datar pela data original de cada transação
+                        </label>
+                      </div>
 
-                      {/* Coluna de Categoria com Combobox pesquisável */}
-                      <td className="py-2.5 px-3">
-                        <div className="w-full max-w-[270px]">
-                          <CategorySelectCombobox
-                            categories={categories}
-                            value={row.category || 'none'}
-                            onChange={(val) => {
-                              const updated = [...previewList]
-                              const chosen = val === 'none' ? undefined : val
-                              updated[idx].category = chosen
-                              setPreviewList(updated)
-                            }}
-                            triggerClassName="h-7 text-xs"
-                            placeholder="Selecione a categoria..."
-                            searchPlaceholder="Buscar categoria ou subcategoria..."
-                            emptyText="Nenhuma categoria encontrada."
-                            specialOption={{ id: 'none', label: 'Não Categorizado' }}
-                          />
-                        </div>
-                      </td>
+                      <p className="text-xs text-slate-600 pl-6">
+                        Cada compra será registrada no dia exato em que ocorreu. Se o ciclo começou
+                        no fim do mês anterior, essas saídas serão contabilizadas naquele mês
+                        passado.
+                      </p>
+                    </div>
 
-                      {/* Seletor individual de moeda da linha */}
-                      <td className="py-2.5 px-2 text-center">
-                        <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 shadow-2xs">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...previewList]
-                              const raw =
-                                row.originalAmount !== undefined ? row.originalAmount : row.amount
-                              const rateUsed = getRateForMonth(row.month, exchangeRates)
-                              const finalBrl = Math.round(raw * rateUsed * 100) / 100
-                              updated[idx] = {
-                                ...row,
-                                amount: finalBrl,
-                                originalAmount: raw,
-                                originalCurrency: 'EUR',
-                              }
-                              setPreviewList(updated)
-                            }}
-                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                              rowCurr === 'EUR'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                            title="Declarar este item em Euro (€)"
-                          >
-                            €
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...previewList]
-                              const raw =
-                                row.originalAmount !== undefined ? row.originalAmount : row.amount
-                              updated[idx] = {
-                                ...row,
-                                amount: raw,
-                                originalAmount: raw,
-                                originalCurrency: 'BRL',
-                              }
-                              setPreviewList(updated)
-                            }}
-                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                              rowCurr === 'BRL'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                            title="Declarar este item em Reais (R$)"
-                          >
-                            R$
-                          </button>
-                        </div>
-                      </td>
+                    <div className="mt-4 pt-3 border-t border-slate-100 pl-6 text-[11px] text-slate-500">
+                      Ideal para extratos de conta corrente ou conciliação diária rigorosa.
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-                      <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
-                        <div>
-                          <span>{formatCurrency(row.amount, 'BRL')}</span>
-                          {rowCurr === 'EUR' && row.originalAmount !== undefined ? (
-                            <span className="block text-[10px] text-slate-400 font-normal">
-                              (orig: € {row.originalAmount.toFixed(2)})
-                            </span>
-                          ) : (
-                            <span className="block text-[10px] text-emerald-600 font-normal">
-                              (orig: R${' '}
-                              {row.originalAmount !== undefined
-                                ? row.originalAmount.toFixed(2)
-                                : row.amount.toFixed(2)}
-                              )
-                            </span>
-                          )}
-                        </div>
-                      </td>
+              {/* Mapeamento de Colunas CSV / XLSX (discreto nesta etapa se aplicável) */}
+              {importFileType === 'csv' && (
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-700">
+                      Mapeamento de Colunas da Planilha
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleApplyMapping}
+                      className="text-xs h-6 text-blue-600 hover:text-blue-700"
+                    >
+                      Reaplicar colunas
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                    <div>
+                      <Label className="text-[10px] text-slate-500">Data</Label>
+                      <Select value={dateCol} onValueChange={setDateCol}>
+                        <SelectTrigger className="h-7 text-xs bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {uploadedHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-[10px] text-slate-500">Descrição</Label>
+                      <Select value={descCol} onValueChange={setDescCol}>
+                        <SelectTrigger className="h-7 text-xs bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {uploadedHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-[10px] text-slate-500">Valor</Label>
+                      <Select value={amountCol} onValueChange={setAmountCol}>
+                        <SelectTrigger className="h-7 text-xs bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {uploadedHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-[10px] text-slate-500">Categoria (Opcional)</Label>
+                      <Select value={categoryCol} onValueChange={setCategoryCol}>
+                        <SelectTrigger className="h-7 text-xs bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Auto-identificar</SelectItem>
+                          {uploadedHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Resumo do que foi identificado */}
+              <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
+                <span className="font-medium">
+                  <strong>{previewList.length}</strong> transações identificadas no arquivo.
+                </span>
+                <span className="text-slate-500">
+                  Na próxima etapa você poderá revisar e alterar categorias individualmente.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================= */}
+          {/* ETAPA 2 — LISTA DE GASTOS E CONFIRMAÇÃO DE CATEGORIAS     */}
+          {/* ========================================================= */}
+          {importStep === 2 && (
+            <div className="flex-1 flex flex-col min-h-0 space-y-3 py-1">
+              {/* Resumo superior dos lançamentos */}
+              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-600">
+                    Lançamentos:{' '}
+                    <strong className="text-slate-900">
+                      {previewList.filter((it) => it.selected !== false).length} de{' '}
+                      {previewList.length} selecionados
+                    </strong>
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-600">
+                    Total:{' '}
+                    <strong className="text-slate-900">
+                      {formatCurrency(
+                        previewList
+                          .filter((it) => it.selected !== false)
+                          .reduce((sum, it) => sum + (it.amount || 0), 0),
+                        'BRL',
+                      )}
+                    </strong>
+                    {amountCurrency === 'EUR' && (
+                      <span className="text-slate-400 font-normal ml-1">
+                        (orig: €{' '}
+                        {previewList
+                          .filter((it) => it.selected !== false)
+                          .reduce((sum, it) => sum + (it.originalAmount || 0), 0)
+                          .toFixed(2)}
+                        )
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-600">
+                    Mês de destino:{' '}
+                    <strong className="text-blue-700">
+                      {dateMode === 'competence'
+                        ? formatMonthShort(competenceMonth)
+                        : 'Datas originais'}
+                    </strong>
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected = previewList.every((it) => it.selected !== false)
+                    setPreviewList(previewList.map((it) => ({ ...it, selected: !allSelected })))
+                  }}
+                  className="font-semibold text-blue-600 hover:text-blue-800 text-[11px] hover:underline"
+                >
+                  {previewList.every((it) => it.selected !== false)
+                    ? 'Desmarcar todos'
+                    : 'Marcar todos'}
+                </button>
+              </div>
+
+              {/* Tabela de transações com seleção de categoria */}
+              <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg max-h-[52vh]">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs">
+                    <tr>
+                      <th className="py-2.5 px-3 w-8 text-center">
+                        <span className="sr-only">Selecionar</span>
+                      </th>
+                      <th className="py-2.5 px-3 w-28">Data</th>
+                      <th className="py-2.5 px-3">Descrição</th>
+                      <th className="py-2.5 px-3 min-w-[280px]">Categoria</th>
+                      <th className="py-2.5 px-3 text-right">
+                        Valor ({amountCurrency === 'EUR' ? 'Convertido em R$' : 'R$ BRL'})
+                      </th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {previewList.map((row, idx) => {
+                      const isChecked = row.selected !== false
 
-          <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-3 pt-2 border-t">
-            <span className="text-xs text-slate-500 font-medium">
-              Total selecionado:{' '}
-              <strong>
-                {previewList.filter((it) => it.selected !== false).length} de {previewList.length}{' '}
-                lançamentos
-              </strong>
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setShowPreviewDialog(false)}
-                disabled={isImporting}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleConfirmImport}
-                disabled={
-                  isImporting ||
-                  previewSanityAlert?.isCorrupted ||
-                  previewList.filter((it) => it.selected !== false).length === 0
-                }
-                className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
-              >
-                {isImporting ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    Gravando lançamentos...
-                  </>
-                ) : (
-                  'Importar Lançamentos'
-                )}
-              </Button>
+                      return (
+                        <tr
+                          key={row.id}
+                          className={`hover:bg-slate-50 transition-colors ${
+                            !isChecked ? 'opacity-40 bg-slate-50/50' : ''
+                          }`}
+                        >
+                          <td className="py-2.5 px-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const updated = [...previewList]
+                                updated[idx].selected = e.target.checked
+                                setPreviewList(updated)
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap tabular-nums font-medium text-slate-900">
+                            {row.date.split('-').reverse().join('/')}
+                            {dateMode === 'competence' &&
+                              row.originalDate &&
+                              row.originalDate !== row.date && (
+                                <span
+                                  className="block text-[10px] text-slate-400 font-normal"
+                                  title={`Data original: ${row.originalDate}`}
+                                >
+                                  orig: {row.originalDate.split('-').reverse().join('/')}
+                                </span>
+                              )}
+                          </td>
+                          <td className="py-2.5 px-3 max-w-[240px]">
+                            <div
+                              className="truncate font-medium text-slate-800"
+                              title={row.description}
+                            >
+                              {row.description}
+                            </div>
+                          </td>
+
+                          {/* Seletor de Categoria com Combobox pesquisável */}
+                          <td className="py-2.5 px-3">
+                            <div className="w-full max-w-[270px]">
+                              <CategorySelectCombobox
+                                categories={categories}
+                                value={row.category || 'none'}
+                                onChange={(val) => {
+                                  const updated = [...previewList]
+                                  const chosen = val === 'none' ? undefined : val
+                                  updated[idx].category = chosen
+                                  setPreviewList(updated)
+                                }}
+                                triggerClassName="h-7 text-xs"
+                                placeholder="Selecione a categoria..."
+                                searchPlaceholder="Buscar categoria ou subcategoria..."
+                                emptyText="Nenhuma categoria encontrada."
+                                specialOption={{ id: 'none', label: 'Não Categorizado' }}
+                              />
+                            </div>
+                          </td>
+
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
+                            <div>
+                              <span>{formatCurrency(row.amount, 'BRL')}</span>
+                              {amountCurrency === 'EUR' && row.originalAmount !== undefined ? (
+                                <span className="block text-[10px] text-slate-400 font-normal">
+                                  (orig: € {row.originalAmount.toFixed(2)})
+                                </span>
+                              ) : (
+                                <span className="block text-[10px] text-emerald-600 font-normal">
+                                  (orig: R${' '}
+                                  {row.originalAmount !== undefined
+                                    ? row.originalAmount.toFixed(2)
+                                    : row.amount.toFixed(2)}
+                                  )
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* RODAPÉ DO MODAL (com navegação entre etapas) */}
+          <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-3 pt-3 border-t">
+            <div>
+              {importStep === 1 ? (
+                <span className="text-xs text-slate-500 font-medium">
+                  {previewList.length} lançamento(s) prontos para categorização
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500 font-medium">
+                  Total a importar:{' '}
+                  <strong className="text-slate-800">
+                    {previewList.filter((it) => it.selected !== false).length} de{' '}
+                    {previewList.length} lançamentos
+                  </strong>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {importStep === 1 ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowPreviewDialog(false)}
+                    disabled={isImporting}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => setImportStep(2)}
+                    disabled={previewList.length === 0 || !dateMode}
+                    className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs gap-1.5"
+                  >
+                    Continuar para Gastos & Categorias
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => setImportStep(1)}
+                    disabled={isImporting}
+                    className="gap-1.5"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Voltar para Competência
+                  </Button>
+                  <Button
+                    onClick={handleConfirmImport}
+                    disabled={
+                      isImporting ||
+                      previewSanityAlert?.isCorrupted ||
+                      previewList.filter((it) => it.selected !== false).length === 0
+                    }
+                    className="bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        Gravando lançamentos...
+                      </>
+                    ) : (
+                      'Confirmar e Importar'
+                    )}
+                  </Button>
+                </>
+              )}
             </div>
           </DialogFooter>
         </DialogContent>

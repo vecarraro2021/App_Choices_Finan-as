@@ -25,6 +25,8 @@ export interface PDFParseResult {
   transactions: PDFParsedTransaction[]
   detectedYear?: number
   detectedCurrency?: 'BRL' | 'EUR'
+  currencyConfidence?: 'high' | 'medium' | 'fallback'
+  currencyReason?: string
   totalLinesScanned: number
   unrecognizedLines: string[]
   reason?: string
@@ -232,17 +234,74 @@ export function inferInvoiceCompetence(
   }
 }
 
+export interface CurrencyDetectionResult {
+  currency: 'BRL' | 'EUR'
+  confidence: 'high' | 'medium' | 'fallback'
+  reason?: string
+}
+
 /**
  * Detecta moeda provável (€ para bancos portugueses/europeus ou R$ para brasileiros)
+ * Retorna também o nível de confiança e razão para transparência no preview.
  */
-function inferDocumentCurrency(fullText: string): 'BRL' | 'EUR' {
-  const euroCount = (fullText.match(/€|eur\b|millennium|cgd|activo|novo banco/gi) || []).length
-  const realCount = (
-    fullText.match(/r\$|brl\b|nubank|ita[uú]|bradesco|inter|c6|santander brasil/gi) || []
+export function detectDocumentCurrency(
+  fullText: string,
+  userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
+): CurrencyDetectionResult {
+  // Símbolos monetários explícitos têm peso maior
+  const euroSymbolCount = (fullText.match(/€|\beur\b|\beuros?\b/gi) || []).length
+  const realSymbolCount = (fullText.match(/r\$|\bbrl\b|\breais\b/gi) || []).length
+
+  // Emissores / bancos conhecidos
+  const euroBankCount = (
+    fullText.match(
+      /millennium(?:\s+bcp)?|caixa\s+geral\s+de\s+dep[oó]sitos|cgd\b|activo(?:\s*bank)?|novo\s+banco|santander\s+totta|banco\s+bpi|montepio|revolut\b/gi,
+    ) || []
+  ).length
+  const brBankCount = (
+    fullText.match(
+      /nubank|nu\s+pagamentos|ita[uú]|bradesco|banco\s+do\s+brasil|inter\b|c6\s*bank|xp\s+investimentos|caixa\s+econ[oô]mica|santander\s+brasil/gi,
+    ) || []
   ).length
 
-  if (euroCount > realCount) return 'EUR'
-  return 'BRL'
+  const euroScore = euroSymbolCount * 3 + euroBankCount * 2
+  const realScore = realSymbolCount * 3 + brBankCount * 2
+
+  if (realScore > 0 && realScore > euroScore) {
+    return {
+      currency: 'BRL',
+      confidence: realScore >= 3 ? 'high' : 'medium',
+      reason:
+        realSymbolCount > 0
+          ? 'Identificado símbolo R$ / BRL no extrato'
+          : 'Identificado emissor bancário brasileiro',
+    }
+  }
+
+  if (euroScore > 0 && euroScore > realScore) {
+    return {
+      currency: 'EUR',
+      confidence: euroScore >= 3 ? 'high' : 'medium',
+      reason:
+        euroSymbolCount > 0
+          ? 'Identificado símbolo € / EUR no extrato'
+          : 'Identificado banco / emissor europeu',
+    }
+  }
+
+  // Se empatou ou nenhum foi detectado
+  return {
+    currency: userDefaultCurrency,
+    confidence: 'fallback',
+    reason: 'Moeda não identificada no arquivo, usando sua moeda padrão',
+  }
+}
+
+/**
+ * Mantido para retrocompatibilidade: retorna apenas 'BRL' | 'EUR'
+ */
+function inferDocumentCurrency(fullText: string): 'BRL' | 'EUR' {
+  return detectDocumentCurrency(fullText).currency
 }
 
 /**
@@ -466,9 +525,11 @@ export function parsePDFStatement(
   lines: string[],
   fullText: string,
   preferredYear?: number,
+  userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
 ): PDFParseResult {
   const detectedYear = preferredYear || inferDocumentYear(fullText)
-  const detectedCurrency = inferDocumentCurrency(fullText)
+  const currencyDetection = detectDocumentCurrency(fullText, userDefaultCurrency)
+  const detectedCurrency = currencyDetection.currency
   const transactions: PDFParsedTransaction[] = []
   const unrecognizedLines: string[] = []
 
@@ -534,6 +595,8 @@ export function parsePDFStatement(
     transactions,
     detectedYear,
     detectedCurrency,
+    currencyConfidence: currencyDetection.confidence,
+    currencyReason: currencyDetection.reason,
     totalLinesScanned: lines.length,
     unrecognizedLines,
     detectedCompetenceMonth: invoiceMeta.competenceMonth,
