@@ -218,6 +218,37 @@ Total de compras do período: R$ 2.499,33
     expect(pagamentoTx?.type).toBe('credit')
   })
 
+  it('extrai fatura Nubank com parcelas, estornos e texto corrido com marcadores de cartão', () => {
+    const lines = [
+      'TRANSAÇÕES DE 31 AGO A 30 SET',
+      '31 AGO •••• 2072 Htm *Aura - Parcela 5/6 R$ 73,02',
+      '05 SET •••• 8930 Landmark Wor*Caplandma - Parcela 3/5 R$ 420,00',
+      '12 SET •••• 1234 ESTORNO COMPRA CANCELADA R$ 50,00',
+      '20 SET •••• 1234 PAGAMENTO DE FATURA -1.000,00',
+    ]
+    const fullText = lines.join('\n')
+    const result = parsePDFStatement(lines, fullText, 2026)
+
+    expect(result.transactions).toHaveLength(4)
+    expect(result.transactions[0].date).toBe('2026-08-31')
+    expect(result.transactions[0].description).toContain('Htm *Aura - Parcela 5/6')
+    expect(result.transactions[0].amount).toBe(73.02)
+    expect(result.transactions[0].type).toBe('debit')
+
+    expect(result.transactions[1].date).toBe('2026-09-05')
+    expect(result.transactions[1].description).toContain('Landmark Wor*Caplandma - Parcela 3/5')
+    expect(result.transactions[1].amount).toBe(420)
+    expect(result.transactions[1].type).toBe('debit')
+
+    expect(result.transactions[2].date).toBe('2026-09-12')
+    expect(result.transactions[2].amount).toBe(50)
+    expect(result.transactions[2].type).toBe('credit')
+
+    expect(result.transactions[3].date).toBe('2026-09-20')
+    expect(result.transactions[3].amount).toBe(1000)
+    expect(result.transactions[3].type).toBe('credit')
+  })
+
   it('identifica fatura Nubank com competência de setembro mesmo com compras iniciadas em agosto e moeda BRL', () => {
     const lines = [
       'Olá, Verônica.',

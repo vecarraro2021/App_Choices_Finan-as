@@ -78,7 +78,7 @@ async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<Extr
     }
 
     const token = pb.authStore.token || ''
-    const baseUrl = pb.baseURL || ''
+    const baseUrl = (pb.baseURL || '').replace(/\/$/, '')
 
     const headers: Record<string, string> = {}
     if (token) {
@@ -151,6 +151,7 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
   setupPdfWorker()
 
   let pdfDoc: pdfjsLib.PDFDocumentProxy
+  let extractionSource: 'client-worker' | 'client-in-process' = 'client-worker'
   try {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer.slice(0)),
@@ -210,6 +211,7 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
           useSystemFonts: true,
         })
         pdfDoc = await inProcessTask.promise
+        extractionSource = 'client-in-process'
       }
     }
   }
@@ -317,5 +319,6 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
     totalPages,
     fullText,
     pages,
+    source: extractionSource,
   }
 }

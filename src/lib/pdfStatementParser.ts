@@ -513,10 +513,14 @@ function tryParseTransactionLine(
 
   // 0. Linhas formatadas como tabela markdown com pipe
   if (trimmed.includes('|')) {
+    const isDividerCol = (val: string) => {
+      const clean = val.replace(/\s+/g, '')
+      return clean.length > 0 && clean.split('').every((ch) => ch === '-' || ch === ':')
+    }
     const rawCols = trimmed
       .split('|')
       .map((s) => s.trim())
-      .filter(Boolean)
+      .filter((s) => s.length > 0 && !isDividerCol(s))
     if (rawCols.length >= 2) {
       const colDate = extractDate(rawCols[0], docYear)
       if (colDate) {
@@ -526,6 +530,8 @@ function tryParseTransactionLine(
           const middleCols = rawCols
             .slice(1, rawCols.length - 1)
             .join(' ')
+            .replace(/^[|\s]+/, '')
+            .replace(/[|\s]+$/, '')
             .trim()
           if (middleCols) {
             let lineCurrency = defaultCurrency
@@ -534,10 +540,13 @@ function tryParseTransactionLine(
 
             const lowerDesc = middleCols.toLowerCase()
             const isCredit =
+              amountFromLast.isNegative ||
               lowerDesc.includes('pagamento recebido') ||
               lowerDesc.includes('pagamento de fatura') ||
               lowerDesc.includes('estorno') ||
-              lowerDesc.includes('reembolso')
+              lowerDesc.includes('reembolso') ||
+              lowerDesc.includes('crédito') ||
+              lowerDesc.includes('credito')
 
             return {
               id: `pdf-tx-${Math.random().toString(36).slice(2, 9)}`,
@@ -618,7 +627,7 @@ function tryParseTransactionLine(
   // Detectar se é crédito (recebimento/pagamento recebido/estorno) ou débito (despesa)
   // Em faturas de cartão: "Pagamento recebido", "Crédito", "Estorno" são entradas
   const lowerDesc = description.toLowerCase()
-  let isCredit = false
+  let isCredit = amountParsed.isNegative
   if (
     lowerDesc.includes('pagamento recebido') ||
     lowerDesc.includes('pagamento de fatura') ||
@@ -629,7 +638,9 @@ function tryParseTransactionLine(
     lowerDesc.includes('pix recebido') ||
     lowerDesc.includes('ordenado') ||
     lowerDesc.includes('salario') ||
-    lowerDesc.includes('rendimento')
+    lowerDesc.includes('rendimento') ||
+    lowerDesc.includes('crédito') ||
+    lowerDesc.includes('credito')
   ) {
     isCredit = true
   }
