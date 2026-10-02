@@ -19,26 +19,26 @@ let isWorkerConfigured = false
 function setupPdfWorker(): void {
   if (isWorkerConfigured || typeof window === 'undefined') return
 
-  const pdfjsVersion = pdfjsLib.version || '4.10.38'
-  // 1. Fallback primário com CDN confiável (jsdelivr) e fallback secundário unpkg
-  const primaryCdnUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
-
   try {
-    // Definimos workerSrc diretamente para a CDN correspondente à versão exata do pdfjs-dist
-    pdfjsLib.GlobalWorkerOptions.workerSrc = primaryCdnUrl
+    // 1. Em ambiente Vite com bundler moderno (produção e dev),
+    // new URL(..., import.meta.url) instrui o Vite a empacotar o arquivo do worker localmente
+    // evitando bloqueios de CORS, CSP externo ou falhas de CDN na nuvem.
+    const localWorkerUrl = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString()
+    pdfjsLib.GlobalWorkerOptions.workerSrc = localWorkerUrl
     isWorkerConfigured = true
-  } catch (err) {
-    console.warn(
-      '[pdfExtractor] Falha ao definir workerSrc CDN, desativando worker para modo direto:',
-      err,
-    )
+  } catch (localErr) {
+    console.warn('[pdfExtractor] Falha ao configurar worker local Vite:', localErr)
+    const pdfjsVersion = pdfjsLib.version || '4.10.38'
+    const primaryCdnUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
     try {
-      pdfjsLib.GlobalWorkerOptions.workerPort = null
-      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      pdfjsLib.GlobalWorkerOptions.workerSrc = primaryCdnUrl
+      isWorkerConfigured = true
     } catch {
-      /* intentionally ignored */
+      isWorkerConfigured = true
     }
-    isWorkerConfigured = true
   }
 }
 
@@ -57,12 +57,97 @@ export interface ExtractedPDF {
   totalPages: number
   fullText: string
   pages: PDFPageText[]
+  source?: 'backend' | 'client-worker' | 'client-in-process'
+}
+
+/**
+ * Tenta extrair o texto de um PDF via endpoint de backend com $documents.toMarkdown.
+ * É a estratégia mais confiável porque executa no servidor Skip Cloud sem restrições de worker no navegador.
+ */
+async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<ExtractedPDF | null> {
+  if (typeof window === 'undefined' || typeof FormData === 'undefined') return null
+
+  try {
+    const formData = new FormData()
+    if (fileOrBuffer instanceof File) {
+      formData.append('arquivo', fileOrBuffer, fileOrBuffer.name)
+    } else {
+      const blob = new Blob([fileOrBuffer], { type: 'application/pdf' })
+      formData.append('arquivo', blob, 'fatura.pdf')
+    }
+
+    let token = ''
+    try {
+      const stored = localStorage.getItem('pocketbase_auth')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        token = parsed.token || ''
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers['Authorization'] = token
+    }
+
+    const res = await fetch('/backend/v1/documentos/convert-pdf', {
+      method: 'POST',
+      body: formData,
+      headers,
+    })
+
+    if (!res.ok) {
+      console.warn('[pdfExtractor] Backend conversion retornou status:', res.status)
+      return null
+    }
+
+    const data = await res.json()
+    const md: string = data.markdown || ''
+    if (!md || md.trim().length === 0) {
+      return null
+    }
+
+    const lines = md
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+
+    return {
+      totalPages: 1,
+      fullText: md,
+      pages: [
+        {
+          pageNumber: 1,
+          text: md,
+          lines,
+        },
+      ],
+      source: 'backend',
+    }
+  } catch (err) {
+    console.warn('[pdfExtractor] Falha ao tentar conversão no backend:', err)
+    return null
+  }
 }
 
 /**
  * Extrai texto e linhas estruturadas de um arquivo PDF carregado pelo usuário.
+ * Prioriza o backend com $documents.toMarkdown e realiza fallback para pdfjs no client.
  */
 export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<ExtractedPDF> {
+  // 1. Tentar primeiro via backend ($documents.toMarkdown) para máxima estabilidade em produção
+  try {
+    const backendResult = await extractViaBackend(file)
+    if (backendResult && backendResult.fullText && backendResult.fullText.trim().length > 0) {
+      return backendResult
+    }
+  } catch (bErr) {
+    console.warn('[pdfExtractor] Erro na tentativa de extração backend:', bErr)
+  }
+
+  // 2. Fallback client-side com pdfjs
   let arrayBuffer: ArrayBuffer
   if (file instanceof File) {
     arrayBuffer = await file.arrayBuffer()
@@ -82,47 +167,60 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
     })
     pdfDoc = await loadingTask.promise
   } catch (initialErr: any) {
-    // Se falhar com erro de worker (ex: "Setting up fake worker failed", "Failed to fetch dynamically imported module", CORS ou rede)
-    // executamos estratégia de recuperação imediata:
-    // 1. Tentar unpkg caso jsdelivr tenha falhado
-    // 2. Ou desabilitar completamente o worker (workerPort = null, workerSrc = '') para rodar 100% in-process
     console.warn(
-      '[pdfExtractor] Falha inicial ao carregar PDF com worker, aplicando recuperação automática:',
+      '[pdfExtractor] Falha inicial ao carregar PDF com worker local Vite, tentando CDN jsdelivr:',
       initialErr,
     )
 
     const pdfjsVersion = pdfjsLib.version || '4.10.38'
+    const jsdelivrUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
     const unpkgUrl = `https://unpkg.com/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`
 
     try {
       pdfjsLib.GlobalWorkerOptions.workerPort = null
-      pdfjsLib.GlobalWorkerOptions.workerSrc = unpkgUrl
-      const unpkgTask = pdfjsLib.getDocument({
+      pdfjsLib.GlobalWorkerOptions.workerSrc = jsdelivrUrl
+      const jsdelivrTask = pdfjsLib.getDocument({
         data: new Uint8Array(arrayBuffer.slice(0)),
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
       })
-      pdfDoc = await unpkgTask.promise
-    } catch (cdnErr) {
+      pdfDoc = await jsdelivrTask.promise
+    } catch (jsdelivrErr) {
       console.warn(
-        '[pdfExtractor] Falha também no fallback CDN alternativo, alternando para fake worker estrito:',
-        cdnErr,
+        '[pdfExtractor] Falha no fallback CDN jsdelivr, tentando unpkg:',
+        jsdelivrErr,
       )
       try {
         pdfjsLib.GlobalWorkerOptions.workerPort = null
-        pdfjsLib.GlobalWorkerOptions.workerSrc = ''
-      } catch {
-        /* intentionally ignored */
-      }
+        pdfjsLib.GlobalWorkerOptions.workerSrc = unpkgUrl
+        const unpkgTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer.slice(0)),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+          useSystemFonts: true,
+        })
+        pdfDoc = await unpkgTask.promise
+      } catch (unpkgErr) {
+        console.warn(
+          '[pdfExtractor] Falha nos workers CDN, tentando modo direto in-process:',
+          unpkgErr,
+        )
+        try {
+          pdfjsLib.GlobalWorkerOptions.workerPort = null
+          pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+        } catch {
+          /* intentionally ignored */
+        }
 
-      const inProcessTask = pdfjsLib.getDocument({
-        data: new Uint8Array(arrayBuffer.slice(0)),
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-      })
-      pdfDoc = await inProcessTask.promise
+        const inProcessTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer.slice(0)),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+          useSystemFonts: true,
+        })
+        pdfDoc = await inProcessTask.promise
+      }
     }
   }
   const totalPages = pdfDoc.numPages

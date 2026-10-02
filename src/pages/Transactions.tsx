@@ -286,9 +286,9 @@ export default function TransactionsView() {
 
       if (!extracted.fullText || extracted.fullText.trim().length === 0) {
         toast({
-          title: 'Não foi possível identificar transações neste PDF',
+          title: 'Não foi possível ler o texto do PDF',
           description:
-            'O arquivo pode ser protegido por senha, digitalizado como imagem sem camada de texto pesquisável ou estar em branco.',
+            'O arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha. O leitor não encontrou nenhum caractere no documento.',
           variant: 'destructive',
         })
         return
@@ -299,11 +299,16 @@ export default function TransactionsView() {
       const parseResult = parsePDFStatement(allLines, extracted.fullText)
 
       if (parseResult.transactions.length === 0) {
+        const failureTitle =
+          parseResult.extractionFailureType === 'empty_text'
+            ? 'Não foi possível ler o texto do PDF'
+            : 'Nenhuma transação identificada no PDF'
+
         toast({
-          title: 'Não foi possível identificar transações neste PDF',
+          title: failureTitle,
           description:
             parseResult.reason ||
-            'Não foram reconhecidas linhas com data, descrição e valor válidos nos padrões comuns de extratos ou faturas.',
+            'O documento foi lido, mas nenhuma linha com padrão de data e valor de transação foi reconhecida.',
           variant: 'destructive',
         })
         return
@@ -403,10 +408,10 @@ export default function TransactionsView() {
     } catch (err: any) {
       console.error('Erro na extração de PDF:', err)
       toast({
-        title: 'Falha ao ler arquivo PDF',
+        title: 'Falha de carregamento/leitura do PDF',
         description:
           err.message ||
-          'Não foi possível extrair o texto deste PDF no seu navegador. Verifique se o arquivo não está corrompido.',
+          'O leitor de PDF encontrou um erro ao processar o arquivo. Verifique se o arquivo não está corrompido ou protegido.',
         variant: 'destructive',
       })
     } finally {

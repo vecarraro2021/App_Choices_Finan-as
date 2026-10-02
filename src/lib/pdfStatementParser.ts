@@ -34,30 +34,55 @@ export interface PDFParseResult {
   detectedPeriodLabel?: string // Ex: "31 AGO a 30 SET"
   detectedDueDate?: string // Ex: "07 OUT 2026" ou "07/10/2026"
   isCreditCardInvoice?: boolean
+  extractionFailureType?: 'empty_text' | 'no_match' | 'worker_error'
 }
 
 // Meses em português para extratos que usam formato "15 JAN" ou "15 Jan 2026"
 export const PT_MONTHS: Record<string, string> = {
   jan: '01',
+  janeiro: '01',
+  january: '01',
   fev: '02',
   feb: '02',
+  fevereiro: '02',
+  february: '02',
   mar: '03',
+  marco: '03',
+  março: '03',
+  march: '03',
   abr: '04',
   apr: '04',
+  abril: '04',
+  april: '04',
   mai: '05',
   may: '05',
+  maio: '05',
   jun: '06',
+  junho: '06',
+  june: '06',
   jul: '07',
+  julho: '07',
+  july: '07',
   agu: '08',
   ago: '08',
   aug: '08',
+  agosto: '08',
+  august: '08',
   set: '09',
   sep: '09',
+  setembro: '09',
+  september: '09',
   out: '10',
   oct: '10',
+  outubro: '10',
+  october: '10',
   nov: '11',
+  novembro: '11',
+  november: '11',
   dez: '12',
   dec: '12',
+  dezembro: '12',
+  december: '12',
 }
 
 /**
@@ -68,7 +93,8 @@ function isNoiseLine(line: string): boolean {
   if (!lower) return true
 
   // Ignorar linhas de página, aviso ou sumário
-  if (/^p[aá]gina\s+\d+(\s+de\s+\d+|\s*\/\s*\d+)?$/i.test(lower)) return true
+  if (/^(?:p[aá]gina\s+)?\d+\s+de\s+\d+$/i.test(lower)) return true
+  if (/^p[aá]gina\s+\d+(\s*\/\s*\d+)?$/i.test(lower)) return true
   if (/^extrato\s+(de\s+conta|banc[aá]rio|mensal|consolidado)/i.test(lower)) return true
   if (/^fatura\s+(do\s+cart[aã]o|fechada|aberta|detalhada)/i.test(lower)) return true
   if (/^saldo\s+(anterior|inicial|final|atual|dispon[ií]vel|bloqueado)/i.test(lower)) return true
@@ -150,16 +176,16 @@ export function inferInvoiceCompetence(
   let dueDate: string | undefined
   let competenceMonth: string | undefined
 
-  // 1. Período vigente (ex: "Período vigente: 31 AGO a 30 SET" ou "TRANSAÇÕES DE 31 AGO A 30 SET" ou "31/08 a 30/09")
+  // 1. Período vigente (ex: "Período vigente: 31 AGO a 30 SET" ou "TRANSAÇÕES DE 31 AGO A 30 SET" ou "31/08 a 30/09" ou "31 AGO - 30 SET")
   const periodMatch = fullText.match(
-    /(?:per[ií]odo(?:\s+vigente)?|transa[çc][oõ]es\s+de)\s*[:-]?\s*(\d{1,2}\s+[A-Za-z]{3}\s+a\s+\d{1,2}\s+[A-Za-z]{3}(?:\s+\d{2,4})?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s+a\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
+    /(?:per[ií]odo(?:\s+vigente)?|transa[çc][oõ]es\s+de|total\s+de\s+compras(?:\s+de\s+todos\s+os\s+cart[oõ]es)?)\s*[:-]?\s*(\d{1,2}\s+[A-Za-z]{3}\s*(?:a|-|at[eé])\s*\d{1,2}\s+[A-Za-z]{3}(?:\s+\d{2,4})?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s*(?:a|-|at[eé])\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
   )
 
   if (periodMatch) {
     periodLabel = periodMatch[1].trim()
     // Tenta extrair o mês final do período (a competência da fatura)
     // Ex: "31 AGO a 30 SET" -> "30 SET"
-    const textEndMatch = periodLabel.match(/a\s+(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i)
+    const textEndMatch = periodLabel.match(/(?:a|-|at[eé])\s+(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i)
     if (textEndMatch) {
       const monthKey = textEndMatch[2].toLowerCase()
       const m = PT_MONTHS[monthKey]
@@ -169,7 +195,7 @@ export function inferInvoiceCompetence(
         competenceMonth = `${y}-${m}`
       }
     } else {
-      const numEndMatch = periodLabel.match(/a\s+\d{1,2}[/-](\d{1,2})(?:[/-](\d{2,4}))?/i)
+      const numEndMatch = periodLabel.match(/(?:a|-|at[eé])\s+\d{1,2}[/-](\d{1,2})(?:[/-](\d{2,4}))?/i)
       if (numEndMatch) {
         const m = numEndMatch[1].padStart(2, '0')
         let y = numEndMatch[2] ? parseInt(numEndMatch[2], 10) : docYear
@@ -401,12 +427,15 @@ function extractDate(
     }
   }
 
-  // 4. Formato "15 Jan" ou "15 Jan 2026"
-  const textMonthMatch = line.match(/^(\d{1,2})\s+([A-Za-z]{3})\.?(?:\s+(\d{2,4}))?\b\s*(.*)$/i)
+  // 4. Formato "15 Jan" ou "15 Jan 2026" ou "15 de Jan" ou "15 Janeiro"
+  const textMonthMatch = line.match(
+    /^(\d{1,2})\s+(?:de\s+)?([A-Za-z]{3,9})\.?(?:\s+(?:de\s+)?(\d{2,4}))?\b\s*(.*)$/i,
+  )
   if (textMonthMatch) {
     const d = textMonthMatch[1].padStart(2, '0')
-    const monthKey = textMonthMatch[2].toLowerCase()
-    const m = PT_MONTHS[monthKey]
+    const monthWord = textMonthMatch[2].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const monthKey3 = monthWord.slice(0, 3)
+    const m = PT_MONTHS[monthWord] || PT_MONTHS[monthKey3]
     if (m) {
       let y = textMonthMatch[3] ? textMonthMatch[3] : String(docYear)
       if (y.length === 2) y = '20' + y
@@ -414,6 +443,46 @@ function extractDate(
         dateStr: `${textMonthMatch[1]} ${textMonthMatch[2]}`,
         normDate: `${y}-${m}-${d}`,
         remainingText: textMonthMatch[4].trim(),
+      }
+    }
+  }
+
+  // 5. Linha de tabela markdown que começa com delimitador de coluna ou traço: ex: "| 31 AGO |"
+  const pipeDateMatch = line.match(
+    /^[|\s-]*(\d{1,2})[\s/-]+([A-Za-z]{3,9}|\d{1,2})(?:[\s/-]+(\d{2,4}))?\b\s*[|]?(.*)$/i,
+  )
+  if (pipeDateMatch) {
+    const rawFirst = pipeDateMatch[1]
+    const rawSecond = pipeDateMatch[2]
+    const rawThird = pipeDateMatch[3]
+    const d = rawFirst.padStart(2, '0')
+
+    // Tentar como mês textual
+    const monthWord = rawSecond.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const monthKey3 = monthWord.slice(0, 3)
+    const mText = PT_MONTHS[monthWord] || PT_MONTHS[monthKey3]
+
+    if (mText) {
+      let y = rawThird ? rawThird : String(docYear)
+      if (y.length === 2) y = '20' + y
+      return {
+        dateStr: `${rawFirst} ${rawSecond}`,
+        normDate: `${y}-${mText}-${d}`,
+        remainingText: pipeDateMatch[4].replace(/^[|\s]+/, '').trim(),
+      }
+    } else if (/^\d{1,2}$/.test(rawSecond)) {
+      // Mês numérico
+      const mNum = rawSecond.padStart(2, '0')
+      const dayVal = parseInt(d, 10)
+      const monthVal = parseInt(mNum, 10)
+      if (dayVal >= 1 && dayVal <= 31 && monthVal >= 1 && monthVal <= 12) {
+        let y = rawThird ? rawThird : String(docYear)
+        if (y.length === 2) y = '20' + y
+        return {
+          dateStr: `${d}/${mNum}`,
+          normDate: `${y}-${mNum}-${d}`,
+          remainingText: pipeDateMatch[4].replace(/^[|\s]+/, '').trim(),
+        }
       }
     }
   }
@@ -432,6 +501,45 @@ function tryParseTransactionLine(
   const trimmed = line.trim()
   if (!trimmed || isNoiseLine(trimmed)) return null
 
+  // 0. Linhas formatadas como tabela markdown com pipe
+  if (trimmed.includes('|')) {
+    const rawCols = trimmed.split('|').map((s) => s.trim()).filter(Boolean)
+    if (rawCols.length >= 2) {
+      const colDate = extractDate(rawCols[0], docYear)
+      if (colDate) {
+        const lastCol = rawCols[rawCols.length - 1]
+        const amountFromLast = extractAmount(lastCol)
+        if (amountFromLast && amountFromLast.amount > 0) {
+          const middleCols = rawCols.slice(1, rawCols.length - 1).join(' ').trim()
+          if (middleCols) {
+            let lineCurrency = defaultCurrency
+            if (lastCol.includes('€') || /EUR/i.test(lastCol)) lineCurrency = 'EUR'
+            else if (lastCol.includes('R$') || /BRL/i.test(lastCol)) lineCurrency = 'BRL'
+
+            const lowerDesc = middleCols.toLowerCase()
+            const isCredit =
+              lowerDesc.includes('pagamento recebido') ||
+              lowerDesc.includes('pagamento de fatura') ||
+              lowerDesc.includes('estorno') ||
+              lowerDesc.includes('reembolso')
+
+            return {
+              id: `pdf-tx-${Math.random().toString(36).slice(2, 9)}`,
+              date: colDate.normDate,
+              rawDate: colDate.dateStr,
+              description: middleCols,
+              amount: amountFromLast.amount,
+              currency: lineCurrency,
+              type: isCredit ? 'credit' : 'debit',
+              rawLine: line,
+              month: colDate.normDate.slice(0, 7),
+            }
+          }
+        }
+      }
+    }
+  }
+
   // 1. Extrair data no início da linha
   const dateResult = extractDate(trimmed, docYear)
   if (!dateResult) return null
@@ -439,29 +547,46 @@ function tryParseTransactionLine(
   const rest = dateResult.remainingText
   if (!rest) return null
 
-  // 2. Extrair valor no final da linha
+  // 2. Extrair valor no final da linha ou antes de colunas secundárias (ex: parcelas, saldos)
   // Ex: "Supermercado Pão de Açúcar 123,45"
+  // Ex: "•••• 2072 Htm *Aura - Parcela 5/6 R$ 73,02"
   // Ex: "UBER *TRIP 14,90-"
   // Ex: "PAGAMENTO DE FATURA -1.250,00"
   // Ex: "CONTINENTE MATOSINHOS € 45,20"
   const valRegex =
     /(?:(R\$|€|EUR|BRL)\s*)?([-+]?\s*[0-9]{1,3}(?:[.,][0-9]{3})*[.,][0-9]{2})\s*([+-]|D|C|CR)?$/i
 
-  const valMatch = rest.match(valRegex)
-  if (!valMatch) return null
+  let valMatch = rest.match(valRegex)
+  let description = ''
+  let fullValStr = ''
 
-  const fullValStr = valMatch[0]
+  if (valMatch) {
+    fullValStr = valMatch[0]
+    description = rest.slice(0, valMatch.index).trim()
+  } else {
+    // Tenta encontrar padrão markdown table ou colunas: "... | R$ 123,45 |" ou "... 123,45 (com trailing noise)"
+    const tableValMatch = rest.match(
+      /(?:(R\$|€|EUR|BRL)\s*)?([-+]?\s*[0-9]{1,3}(?:[.,][0-9]{3})*[.,][0-9]{2})\s*([+-]|D|C|CR)?(?:\s*\|?\s*)$/i,
+    )
+    if (tableValMatch) {
+      valMatch = tableValMatch
+      fullValStr = tableValMatch[0]
+      description = rest.slice(0, tableValMatch.index).trim()
+    }
+  }
+
+  if (!valMatch || !fullValStr) return null
+
   const amountParsed = extractAmount(fullValStr)
   if (!amountParsed || amountParsed.amount === 0) return null
-
-  // A descrição é o que fica entre a data e o valor
-  let description = rest.slice(0, valMatch.index).trim()
 
   // Se sobrou pouca descrição ou nada, pode ser que o valor não seja o último token
   if (!description) return null
 
-  // Limpar caracteres repetidos de tabela/espaçamento como "... " ou "---"
+  // Limpar pipes de tabela markdown e caracteres repetidos de tabela/espaçamento como "... " ou "---"
   description = description
+    .replace(/^[|\s]+/, '')
+    .replace(/[|\s]+$/, '')
     .replace(/[._-]{3,}/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim()
@@ -549,7 +674,13 @@ export function parsePDFStatement(
     }
 
     // Tenta reconhecer como nova transação
-    const tx = tryParseTransactionLine(rawLine, detectedYear, detectedCurrency)
+    let tx = tryParseTransactionLine(rawLine, detectedYear, detectedCurrency)
+
+    // Fallback: se a linha tem colunas markdown pipe (ex: | 31 AGO | UBER TRIP | 14,90 |)
+    if (!tx && rawLine.includes('|')) {
+      const cleaned = rawLine.replace(/^\|/, '').replace(/\|$/, '').trim()
+      tx = tryParseTransactionLine(cleaned, detectedYear, detectedCurrency)
+    }
 
     if (tx) {
       if (pendingTx) {
@@ -591,6 +722,22 @@ export function parsePDFStatement(
   // Detecção de competência da fatura (período vigente, vencimento)
   const invoiceMeta = inferInvoiceCompetence(fullText, detectedYear)
 
+  const hasNoText = fullText.trim().length === 0
+  let failureType: 'empty_text' | 'no_match' | 'worker_error' | undefined
+  let failureReason: string | undefined
+
+  if (transactions.length === 0) {
+    if (hasNoText) {
+      failureType = 'empty_text'
+      failureReason =
+        'Não foi possível extrair o texto deste PDF — o arquivo pode ser uma imagem digitalizada sem camada de texto OCR ou estar corrompido/protegido.'
+    } else {
+      failureType = 'no_match'
+      failureReason =
+        'O texto do PDF foi extraído com sucesso, mas nenhum padrão de data e valor de transação foi identificado no conteúdo.'
+    }
+  }
+
   return {
     transactions,
     detectedYear,
@@ -603,9 +750,7 @@ export function parsePDFStatement(
     detectedPeriodLabel: invoiceMeta.periodLabel,
     detectedDueDate: invoiceMeta.dueDate,
     isCreditCardInvoice: invoiceMeta.isInvoice,
-    reason:
-      transactions.length === 0
-        ? 'Não foi possível identificar transações neste PDF — pode ser protegido por senha, digitalizado sem camada de texto (imagem) ou em formato não reconhecido.'
-        : undefined,
+    reason: failureReason,
+    extractionFailureType: failureType,
   }
 }
