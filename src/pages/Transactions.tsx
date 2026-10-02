@@ -1556,7 +1556,7 @@ export default function TransactionsView() {
             </p>
 
             {/* Div própria abaixo do subtítulo com o stepper horizontal com dois passos alinhado à esquerda */}
-            <div className="flex justify-start pt-1">
+            <div className="flex justify-start pt-6">
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* Passo 1: "1. Competência" */}
                 <button

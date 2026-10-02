@@ -29,6 +29,5 @@ export function InvoiceCompetenceInfoBanner() {
     return null
   }
 
-  return
-  null
+  return null
 }
