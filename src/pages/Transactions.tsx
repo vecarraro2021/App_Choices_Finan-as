@@ -1646,26 +1646,8 @@ export default function TransactionsView() {
 
                 {/* Direita: badge verde claro "Moeda detectada" com bolinha verde de status + link discreto */}
                 <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto flex-wrap">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/90 font-medium text-xs shadow-2xs">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                    <span>
-                      Moeda detectada:{' '}
-                      <strong className="font-semibold">
-                        {amountCurrency === 'EUR' ? 'EUR (€)' : 'BRL (R$)'}
-                      </strong>
-                    </span>
-                  </div>
-
                   {/* Link sublinhado discreto "não é esta a moeda?" */}
                   <div className="relative inline-flex items-center">
-                    <button
-                      type="button"
-                      onClick={() => setShowCurrencyOverrideSelect((prev) => !prev)}
-                      className="text-[11px] text-slate-500 hover:text-slate-800 underline decoration-slate-300 hover:decoration-slate-600 transition-colors cursor-pointer"
-                    >
-                      não é esta a moeda?
-                    </button>
-
                     {/* Popover / Seletor manual de moeda quando clicado */}
                     {showCurrencyOverrideSelect && (
                       <div className="absolute right-0 top-full mt-1.5 p-2 bg-white rounded-lg border border-slate-200 shadow-lg z-30 flex items-center gap-1.5 text-xs whitespace-nowrap">
@@ -1723,9 +1705,7 @@ export default function TransactionsView() {
                   </div>
                   {/* Parágrafo explicativo cinza */}
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Em faturas de cartão de crédito, compras feitas nos últimos dias do mês anterior
-                    costumam constar no ciclo da fatura seguinte. Escolha onde esses gastos devem
-                    entrar no seu orçamento mensal.
+                    &nbsp;Escolha onde esses gastos devem entrar no seu orçamento mensal.
                   </p>
                 </div>
 
@@ -1767,8 +1747,7 @@ export default function TransactionsView() {
                           </div>
                           <p className="text-xs text-slate-600 leading-relaxed pt-1">
                             Todas as transações do ciclo desta fatura serão agrupadas no orçamento
-                            do mês especificado. Compras do final do mês anterior não sujarão o mês
-                            passado.
+                            do mês especificado.&nbsp;
                           </p>
                         </div>
                       </div>
