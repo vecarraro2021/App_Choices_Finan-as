@@ -1555,8 +1555,8 @@ export default function TransactionsView() {
                 : `Etapa 2 de 2: Revise os lançamentos identificados e confirme suas respectivas categorias.`}
             </p>
 
-            {/* Div própria abaixo do subtítulo com o stepper horizontal com dois passos alinhado à direita */}
-            <div className="flex justify-end pt-1">
+            {/* Div própria abaixo do subtítulo com o stepper horizontal com dois passos alinhado à esquerda */}
+            <div className="flex justify-start pt-1">
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* Passo 1: "1. Competência" */}
                 <button
