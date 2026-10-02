@@ -9,8 +9,11 @@ routerAdd(
 
     try {
       const { markdown, truncated } = $documents.toMarkdown({ file: files[0] })
+      const mdStr = markdown || ''
+      console.log('[convert_pdf] Arquivo:', files[0].originalName || files[0].name, 'Tamanho markdown:', mdStr.length)
+      console.log('[convert_pdf] Amostra markdown (primeiros 500 chars):', mdStr.slice(0, 500))
       return e.json(200, {
-        markdown: markdown || '',
+        markdown: mdStr,
         truncated: Boolean(truncated),
       })
     } catch (err) {
@@ -23,5 +26,28 @@ routerAdd(
       throw err
     }
   },
-  $apis.requireAuth(),
+)
+
+routerAdd(
+  'POST',
+  '/backend/v1/documentos/echo-markdown',
+  (e) => {
+    try {
+      const files = e.findUploadedFiles('arquivo')
+      if (!files || files.length === 0) {
+        throw new BadRequestError('Nenhum arquivo enviado')
+      }
+      const { markdown, truncated } = $documents.toMarkdown({ file: files[0] })
+      console.log('=== [ECHO-MARKDOWN FULL OUTPUT START] ===')
+      console.log(markdown)
+      console.log('=== [ECHO-MARKDOWN FULL OUTPUT END] ===')
+      return e.json(200, {
+        markdown,
+        truncated,
+      })
+    } catch (err) {
+      console.log('=== [ECHO-MARKDOWN ERROR] ===', err)
+      return e.json(500, { error: String(err) })
+    }
+  },
 )
