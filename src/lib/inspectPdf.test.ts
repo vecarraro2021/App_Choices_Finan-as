@@ -71,7 +71,21 @@ describe('inspect real pdf', () => {
     const fullText = allLines.join('\n')
     const parseResult = parsePDFStatement(allLines, fullText)
 
-    const summary = `LINES_DUMP:::${allLines.slice(0, 50).join(' || ')}:::TOTAL_${allLines.length}`
-    expect(summary).toBe('FORCE_SHOW_OUTPUT')
+    // Save lines and text to inspect in tests
+    fs.writeFileSync(
+      path.resolve('src/lib/nubank_dump.json'),
+      JSON.stringify(
+        {
+          totalLines: allLines.length,
+          lines: allLines,
+          parseCount: parseResult.transactions.length,
+          parseTransactions: parseResult.transactions,
+        },
+        null,
+        2,
+      ),
+    )
+
+    expect(allLines.length).toBe(0) // intentionally fail to see parseCount and sample lines
   })
 })
