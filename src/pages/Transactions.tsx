@@ -1538,16 +1538,25 @@ export default function TransactionsView() {
       {/* IMPORT PREVIEW & COLUMN MAPPING MODAL (REDESENHADO BASEADO NA REFERÊNCIA) */}
       <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
         <DialogContent className="w-full max-w-[847px] max-h-[92vh] flex flex-col p-6 sm:p-7 bg-white text-slate-900 overflow-hidden shadow-2xl border border-slate-200 rounded-xl">
-          {/* 1. CABEÇALHO (LINHA ÚNICA + SUBTÍTULO) */}
+          {/* 1. CABEÇALHO (LINHA ÚNICA + SUBTÍTULO + STEPPER ABAIXO) */}
           <DialogHeader className="pb-3 text-left space-y-1.5">
-            <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center justify-between gap-3">
               {/* Esquerda: ícone sparkles azul pequeno + título grande em bold escuro */}
               <DialogTitle className="flex items-center gap-2 text-base sm:text-lg md:text-xl font-bold text-slate-900 tracking-tight">
                 <Sparkles className="h-5 w-5 text-blue-600 shrink-0" />
                 <span>Importação de Extrato / Fatura PDF</span>
               </DialogTitle>
+            </div>
 
-              {/* Direita (mesma linha): stepper horizontal com dois passos */}
+            {/* Subtítulo cinza logo abaixo do título */}
+            <p className="text-xs sm:text-[13px] text-slate-500 font-normal leading-normal">
+              {importStep === 1
+                ? 'Defina o mês de competência das transações e confira as categorias sugeridas'
+                : `Etapa 2 de 2: Revise os lançamentos identificados e confirme suas respectivas categorias.`}
+            </p>
+
+            {/* Div própria abaixo do subtítulo com o stepper horizontal com dois passos alinhado à direita */}
+            <div className="flex justify-end pt-1">
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* Passo 1: "1. Competência" */}
                 <button
@@ -1596,12 +1605,6 @@ export default function TransactionsView() {
               </div>
             </div>
 
-            {/* Subtítulo cinza logo abaixo do título */}
-            <p className="text-xs sm:text-[13px] text-slate-500 font-normal leading-normal">
-              {importStep === 1
-                ? 'Defina o mês de competência das transações e confira as categorias sugeridas'
-                : `Etapa 2 de 2: Revise os lançamentos identificados e confirme suas respectivas categorias.`}
-            </p>
             <DialogDescription className="sr-only">
               Importação de Extrato / Fatura com seleção de competência e categorização
             </DialogDescription>
