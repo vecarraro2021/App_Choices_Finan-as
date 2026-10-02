@@ -1599,7 +1599,7 @@ export default function TransactionsView() {
             {/* Subtítulo cinza logo abaixo do título */}
             <p className="text-xs sm:text-[13px] text-slate-500 font-normal leading-normal">
               {importStep === 1
-                ? 'Etapa 1 de 2: Defina como o sistema deve alocar os meses das compras e confira a moeda identificada.'
+                ? 'Defina o mês de competência das transações e confira as categorias sugeridas'
                 : `Etapa 2 de 2: Revise os lançamentos identificados e confirme suas respectivas categorias.`}
             </p>
             <DialogDescription className="sr-only">
