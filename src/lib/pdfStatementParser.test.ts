@@ -140,7 +140,7 @@ describe('parsePDFStatement', () => {
     expect(result.transactions[2].type).toBe('debit')
   })
 
-  it('deve retornar mensagem clara caso nenhuma transação seja identificada', () => {
+  it('deve retornar mensagem clara e extractionFailureType no_match caso nenhuma transação seja identificada em texto existente', () => {
     const lines = [
       'Termos de Uso e Condições Gerais',
       'Este documento não possui lançamentos financeiros.',
@@ -149,8 +149,73 @@ describe('parsePDFStatement', () => {
     const result = parsePDFStatement(lines, fullText)
 
     expect(result.transactions).toHaveLength(0)
-    expect(result.reason).toBeDefined()
-    expect(result.reason).toContain('Não foi possível identificar transações')
+    expect(result.extractionFailureType).toBe('no_match')
+    expect(result.reason).toBe(
+      'Nenhuma transação identificada no PDF — o texto do PDF foi extraído com sucesso, mas nenhum padrão de data e valor de transação foi identificado.',
+    )
+  })
+
+  it('deve retornar extractionFailureType empty_text quando o texto for vazio', () => {
+    const result = parsePDFStatement([], '')
+    expect(result.transactions).toHaveLength(0)
+    expect(result.extractionFailureType).toBe('empty_text')
+    expect(result.reason).toBe(
+      'Não foi possível ler o texto do PDF — o arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha.',
+    )
+  })
+
+  it('extrai corretamente fatura Nubank realista com múltiplos formatos de data, parcelas e tabela markdown', () => {
+    const sampleInvoiceText = `
+# Nu Pagamentos S.A. - Fatura de Cartão de Crédito
+Olá, Verônica
+Esta é a sua fatura com vencimento em 07 OUT 2026
+
+Data de vencimento: 07 OUT 2026
+Período vigente: 31 AGO a 30 SET
+Limite total: R$ 5.211,74
+Valor total da fatura: R$ 2.499,33
+
+TRANSAÇÕES DE 31 AGO A 30 SET
+
+| Data | Descrição | Valor |
+| --- | --- | --- |
+| 31 AGO | Htm *Aura - Parcela 5/6 | R$ 73,02 |
+| 31 AGO | Landmark Wor*Caplandma - Parcela 3/5 | R$ 420,00 |
+| 02 SET | Supermercado Pinheiro | R$ 332,33 |
+| 05 SET | Farmácia São Paulo | R$ 89,90 |
+| 15 SET | Pagamento recebido | -1.500,00 |
+| 28 SET | Uber *Trip | R$ 24,90 |
+
+Total de compras do período: R$ 2.499,33
+`
+    const lines = sampleInvoiceText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+
+    const result = parsePDFStatement(lines, sampleInvoiceText)
+
+    expect(result.isCreditCardInvoice).toBe(true)
+    expect(result.detectedCompetenceMonth).toBe('2026-09')
+    expect(result.detectedPeriodLabel).toBe('31 AGO a 30 SET')
+    expect(result.detectedDueDate).toBe('07 OUT 2026')
+    expect(result.detectedCurrency).toBe('BRL')
+    expect(result.currencyConfidence).toBe('high')
+    expect(result.transactions.length).toBe(6)
+
+    // Primeira transação em 31 de AGO
+    expect(result.transactions[0].date).toBe('2026-08-31')
+    expect(result.transactions[0].description).toContain('Htm *Aura')
+    expect(result.transactions[0].amount).toBe(73.02)
+    expect(result.transactions[0].type).toBe('debit')
+
+    // Transação de Pagamento Recebido (crédito)
+    const pagamentoTx = result.transactions.find((t) =>
+      t.description.toLowerCase().includes('pagamento recebido'),
+    )
+    expect(pagamentoTx).toBeDefined()
+    expect(pagamentoTx?.amount).toBe(1500)
+    expect(pagamentoTx?.type).toBe('credit')
   })
 
   it('identifica fatura Nubank com competência de setembro mesmo com compras iniciadas em agosto e moeda BRL', () => {

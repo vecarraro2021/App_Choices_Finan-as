@@ -25,7 +25,7 @@ import {
 import { convertSheetToMarkdown } from '@/services/financeService'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { Transaction, Category, ExchangeRate } from '@/types/finance'
-import { extractTextFromPDF } from '@/lib/pdfExtractor'
+import { extractTextFromPDF, ExtractedPDF } from '@/lib/pdfExtractor'
 import { parsePDFStatement, PDFParsedTransaction } from '@/lib/pdfStatementParser'
 import { useToast } from '@/hooks/use-toast'
 import {
@@ -278,17 +278,28 @@ export default function TransactionsView() {
     return list
   }, [])
 
-  // Processamento de arquivo PDF (client-side)
+  // Processamento de arquivo PDF (híbrido server-side via $documents.toMarkdown + client fallback)
   const processPdfFile = async (file: File) => {
     try {
       setIsProcessingFile(true)
-      const extracted = await extractTextFromPDF(file)
+      let extracted: ExtractedPDF
+      try {
+        extracted = await extractTextFromPDF(file)
+      } catch (extractErr: any) {
+        console.error('Falha de carregamento/leitura do PDF:', extractErr)
+        toast({
+          title: 'Falha de carregamento/leitura do PDF',
+          description: 'O leitor de PDF encontrou um erro ao processar o arquivo.',
+          variant: 'destructive',
+        })
+        return
+      }
 
       if (!extracted.fullText || extracted.fullText.trim().length === 0) {
         toast({
           title: 'Não foi possível ler o texto do PDF',
           description:
-            'O arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha. O leitor não encontrou nenhum caractere no documento.',
+            'O arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha.',
           variant: 'destructive',
         })
         return
@@ -299,18 +310,28 @@ export default function TransactionsView() {
       const parseResult = parsePDFStatement(allLines, extracted.fullText)
 
       if (parseResult.transactions.length === 0) {
-        const failureTitle =
-          parseResult.extractionFailureType === 'empty_text'
-            ? 'Não foi possível ler o texto do PDF'
-            : 'Nenhuma transação identificada no PDF'
-
-        toast({
-          title: failureTitle,
-          description:
-            parseResult.reason ||
-            'O documento foi lido, mas nenhuma linha com padrão de data e valor de transação foi reconhecida.',
-          variant: 'destructive',
-        })
+        if (parseResult.extractionFailureType === 'empty_text') {
+          toast({
+            title: 'Não foi possível ler o texto do PDF',
+            description:
+              'O arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha.',
+            variant: 'destructive',
+          })
+        } else if (parseResult.extractionFailureType === 'worker_error') {
+          toast({
+            title: 'Falha de carregamento/leitura do PDF',
+            description: 'O leitor de PDF encontrou um erro ao processar o arquivo.',
+            variant: 'destructive',
+          })
+        } else {
+          // 'no_match' ou padrão não identificado
+          toast({
+            title: 'Nenhuma transação identificada no PDF',
+            description:
+              'O texto do PDF foi extraído com sucesso, mas nenhum padrão de data e valor de transação foi identificado.',
+            variant: 'destructive',
+          })
+        }
         return
       }
 
@@ -406,12 +427,10 @@ export default function TransactionsView() {
         description: `${parseResult.transactions.length} transações identificadas em ${extracted.totalPages} página(s).`,
       })
     } catch (err: any) {
-      console.error('Erro na extração de PDF:', err)
+      console.error('Erro no processamento da fatura/extrato PDF:', err)
       toast({
         title: 'Falha de carregamento/leitura do PDF',
-        description:
-          err.message ||
-          'O leitor de PDF encontrou um erro ao processar o arquivo. Verifique se o arquivo não está corrompido ou protegido.',
+        description: 'O leitor de PDF encontrou um erro ao processar o arquivo.',
         variant: 'destructive',
       })
     } finally {

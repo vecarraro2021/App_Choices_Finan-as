@@ -3,6 +3,7 @@
  * Processamento 100% client-side sem envio de dados a serviços externos.
  */
 import * as pdfjsLib from 'pdfjs-dist'
+import pb from './pocketbase/client'
 
 /**
  * Inicialização robusta e à prova de falhas do worker do PDF.js.
@@ -76,23 +77,15 @@ async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<Extr
       formData.append('arquivo', blob, 'fatura.pdf')
     }
 
-    let token = ''
-    try {
-      const stored = localStorage.getItem('pocketbase_auth')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        token = parsed.token || ''
-      }
-    } catch {
-      /* ignore */
-    }
+    const token = pb.authStore.token || ''
+    const baseUrl = pb.baseURL || ''
 
     const headers: Record<string, string> = {}
     if (token) {
-      headers['Authorization'] = token
+      headers['Authorization'] = `Bearer ${token}`
     }
 
-    const res = await fetch('/backend/v1/documentos/convert-pdf', {
+    const res = await fetch(`${baseUrl}/backend/v1/documentos/convert-pdf`, {
       method: 'POST',
       body: formData,
       headers,
@@ -187,10 +180,7 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
       })
       pdfDoc = await jsdelivrTask.promise
     } catch (jsdelivrErr) {
-      console.warn(
-        '[pdfExtractor] Falha no fallback CDN jsdelivr, tentando unpkg:',
-        jsdelivrErr,
-      )
+      console.warn('[pdfExtractor] Falha no fallback CDN jsdelivr, tentando unpkg:', jsdelivrErr)
       try {
         pdfjsLib.GlobalWorkerOptions.workerPort = null
         pdfjsLib.GlobalWorkerOptions.workerSrc = unpkgUrl

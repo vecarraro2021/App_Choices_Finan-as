@@ -185,7 +185,9 @@ export function inferInvoiceCompetence(
     periodLabel = periodMatch[1].trim()
     // Tenta extrair o mês final do período (a competência da fatura)
     // Ex: "31 AGO a 30 SET" -> "30 SET"
-    const textEndMatch = periodLabel.match(/(?:a|-|at[eé])\s+(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i)
+    const textEndMatch = periodLabel.match(
+      /(?:a|-|at[eé])\s+(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{2,4}))?/i,
+    )
     if (textEndMatch) {
       const monthKey = textEndMatch[2].toLowerCase()
       const m = PT_MONTHS[monthKey]
@@ -195,7 +197,9 @@ export function inferInvoiceCompetence(
         competenceMonth = `${y}-${m}`
       }
     } else {
-      const numEndMatch = periodLabel.match(/(?:a|-|at[eé])\s+\d{1,2}[/-](\d{1,2})(?:[/-](\d{2,4}))?/i)
+      const numEndMatch = periodLabel.match(
+        /(?:a|-|at[eé])\s+\d{1,2}[/-](\d{1,2})(?:[/-](\d{2,4}))?/i,
+      )
       if (numEndMatch) {
         const m = numEndMatch[1].padStart(2, '0')
         let y = numEndMatch[2] ? parseInt(numEndMatch[2], 10) : docYear
@@ -433,7 +437,10 @@ function extractDate(
   )
   if (textMonthMatch) {
     const d = textMonthMatch[1].padStart(2, '0')
-    const monthWord = textMonthMatch[2].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const monthWord = textMonthMatch[2]
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
     const monthKey3 = monthWord.slice(0, 3)
     const m = PT_MONTHS[monthWord] || PT_MONTHS[monthKey3]
     if (m) {
@@ -458,7 +465,10 @@ function extractDate(
     const d = rawFirst.padStart(2, '0')
 
     // Tentar como mês textual
-    const monthWord = rawSecond.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const monthWord = rawSecond
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
     const monthKey3 = monthWord.slice(0, 3)
     const mText = PT_MONTHS[monthWord] || PT_MONTHS[monthKey3]
 
@@ -503,14 +513,20 @@ function tryParseTransactionLine(
 
   // 0. Linhas formatadas como tabela markdown com pipe
   if (trimmed.includes('|')) {
-    const rawCols = trimmed.split('|').map((s) => s.trim()).filter(Boolean)
+    const rawCols = trimmed
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean)
     if (rawCols.length >= 2) {
       const colDate = extractDate(rawCols[0], docYear)
       if (colDate) {
         const lastCol = rawCols[rawCols.length - 1]
         const amountFromLast = extractAmount(lastCol)
         if (amountFromLast && amountFromLast.amount > 0) {
-          const middleCols = rawCols.slice(1, rawCols.length - 1).join(' ').trim()
+          const middleCols = rawCols
+            .slice(1, rawCols.length - 1)
+            .join(' ')
+            .trim()
           if (middleCols) {
             let lineCurrency = defaultCurrency
             if (lastCol.includes('€') || /EUR/i.test(lastCol)) lineCurrency = 'EUR'
@@ -730,11 +746,11 @@ export function parsePDFStatement(
     if (hasNoText) {
       failureType = 'empty_text'
       failureReason =
-        'Não foi possível extrair o texto deste PDF — o arquivo pode ser uma imagem digitalizada sem camada de texto OCR ou estar corrompido/protegido.'
+        'Não foi possível ler o texto do PDF — o arquivo não possui camada de texto pesquisável (pode ser uma imagem escaneada) ou está protegido por senha.'
     } else {
       failureType = 'no_match'
       failureReason =
-        'O texto do PDF foi extraído com sucesso, mas nenhum padrão de data e valor de transação foi identificado no conteúdo.'
+        'Nenhuma transação identificada no PDF — o texto do PDF foi extraído com sucesso, mas nenhum padrão de data e valor de transação foi identificado.'
     }
   }
 
