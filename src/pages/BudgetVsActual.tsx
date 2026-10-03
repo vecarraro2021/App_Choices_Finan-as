@@ -30,7 +30,9 @@ import {
   MoveRight,
   CornerDownRight,
   Download,
+  ListFilter,
 } from 'lucide-react'
+import { BudgetLineDetailDrawer } from '@/components/BudgetLineDetailDrawer'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -65,6 +67,10 @@ export default function BudgetVsActualView() {
   const [movingSubCategory, setMovingSubCategory] = useState<Category | null>(null)
   const [targetParentId, setTargetParentId] = useState<string>('')
   const [moving, setMoving] = useState(false)
+
+  // Detail Drawer state for line item breakdown
+  const [detailCategory, setDetailCategory] = useState<Category | null>(null)
+  const [detailParentCategory, setDetailParentCategory] = useState<Category | null>(null)
 
   // Modal to edit estimated budget
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
@@ -828,21 +834,40 @@ export default function BudgetVsActualView() {
                               )}
                             </div>
 
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-slate-400 hover:text-blue-600 shrink-0"
-                              onClick={() => {
-                                const found = categories.find((c) => c.id === row.id)
-                                if (found) handleOpenEstimateModal(found)
-                              }}
-                              title="Editar orçamento estimado desta categoria"
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-slate-400 hover:text-blue-600 shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const found = categories.find((c) => c.id === row.id)
+                                  if (found) {
+                                    setDetailCategory(found)
+                                    setDetailParentCategory(null)
+                                  }
+                                }}
+                                title="Ver detalhamento de lançamentos desta categoria"
+                                aria-label={`Ver lançamentos de ${row.name}`}
+                              >
+                                <ListFilter className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-slate-400 hover:text-blue-600 shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const found = categories.find((c) => c.id === row.id)
+                                  if (found) handleOpenEstimateModal(found)
+                                }}
+                                title="Editar orçamento estimado desta categoria"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </div>
                         </td>
-
                         <td className="py-3 px-3 text-right tabular-nums text-slate-500 whitespace-nowrap">
                           {row.hasSubcategories ? (
                             <span
@@ -957,6 +982,24 @@ export default function BudgetVsActualView() {
                                   </div>
 
                                   <div className="flex items-center gap-1 shrink-0">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 text-slate-400 hover:text-blue-600"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (foundSub) {
+                                          const parentFound =
+                                            categories.find((c) => c.id === row.id) || null
+                                          setDetailCategory(foundSub)
+                                          setDetailParentCategory(parentFound)
+                                        }
+                                      }}
+                                      title="Ver detalhamento de lançamentos desta subcategoria"
+                                      aria-label={`Ver lançamentos de ${sub.name}`}
+                                    >
+                                      <ListFilter className="h-3 w-3" />
+                                    </Button>
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -1243,6 +1286,22 @@ export default function BudgetVsActualView() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* DETAIL DRAWER / SHEET LATERAL DE LANÇAMENTOS */}
+      <BudgetLineDetailDrawer
+        isOpen={!!detailCategory}
+        onClose={() => {
+          setDetailCategory(null)
+          setDetailParentCategory(null)
+        }}
+        category={detailCategory}
+        parentCategory={detailParentCategory}
+        transactions={transactions}
+        allCategories={categories}
+        activeMonths={activeMonths}
+        currency={currency}
+        exchangeRates={exchangeRates}
+      />
     </div>
   )
 }
