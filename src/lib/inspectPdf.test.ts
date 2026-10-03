@@ -90,7 +90,47 @@ describe('inspect real pdf', () => {
     expect(allLines.length).toBeGreaterThan(0)
   })
 
-  it('verifies syntax check', () => {
-    expect(true).toBe(true)
+  it('fetches real backend markdown for nu statement and tests parser against it', async () => {
+    const pdfPath = path.resolve('src/assets/nu76223058401set202630set2026-b97da.pdf')
+    expect(fs.existsSync(pdfPath)).toBe(true)
+    const fileBuf = fs.readFileSync(pdfPath)
+
+    // Send to backend endpoint
+    const baseUrl = 'https://gestao-financeira-pessoal-fbcab.shrd00.internal.goskip.dev'
+    const formData = new FormData()
+    const blob = new Blob([fileBuf], { type: 'application/pdf' })
+    formData.append('arquivo', blob, 'NU_762230584_01SET2026_30SET2026.pdf')
+
+    const res = await fetch(`${baseUrl}/backend/v1/documentos/dump-markdown`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    console.log('Status from dump-markdown:', res.status)
+    expect(res.ok).toBe(true)
+    const data = await res.json()
+    const md = data.markdown as string
+    console.log('Markdown length:', md.length)
+
+    // Save real backend markdown to disk so we can inspect and use it in tests
+    fs.writeFileSync(path.resolve('src/lib/nu_backend_markdown_dump.md'), md)
+
+    const lines = md
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+
+    console.log('Total non-empty lines from backend:', lines.length)
+    console.log('First 25 lines from backend:\n', lines.slice(0, 25))
+
+    const parseResult = parsePDFStatement(lines, md)
+    const debits = parseResult.transactions.filter((tx) => tx.type === 'debit')
+    const credits = parseResult.transactions.filter((tx) => tx.type === 'credit')
+    const sumDebits = debits.reduce((acc, tx) => acc + tx.amount, 0)
+    const sumCredits = credits.reduce((acc, tx) => acc + tx.amount, 0)
+
+    throw new Error(
+      `BACKEND_EVAL: unrec=${JSON.stringify(parseResult.unrecognizedLines)}`,
+    )
   })
 })

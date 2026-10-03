@@ -29,28 +29,18 @@ routerAdd('POST', '/backend/v1/documentos/convert-pdf', (e) => {
   }
 })
 
-routerAdd('GET', '/backend/v1/inspect-nubank-test', (e) => {
-  const filePath = 'src/assets/nubank2026-10-07-f4eba.pdf'
-  let fileExists = false
-  let fileSize = 0
-  let mdResult = ''
-  let errMessage = ''
-  try {
-    const stats = $os.stat(filePath)
-    fileExists = true
-    fileSize = stats.size()
-  } catch (stErr) {
-    errMessage = String(stErr)
+routerAdd('POST', '/backend/v1/documentos/dump-markdown', (e) => {
+  const files = e.findUploadedFiles('arquivo')
+  if (!files || files.length === 0) {
+    throw new BadRequestError('Envie um arquivo PDF')
   }
-
+  const { markdown, truncated } = $documents.toMarkdown({ file: files[0] })
   return e.json(200, {
-    ok: true,
-    fileExists,
-    fileSize,
-    errMessage,
-    mdResult,
+    markdown: markdown || '',
+    truncated: Boolean(truncated),
   })
 })
+
 routerAdd('POST', '/backend/v1/documentos/echo-markdown', (e) => {
   try {
     const files = e.findUploadedFiles('arquivo')
@@ -58,9 +48,6 @@ routerAdd('POST', '/backend/v1/documentos/echo-markdown', (e) => {
       throw new BadRequestError('Nenhum arquivo enviado')
     }
     const { markdown, truncated } = $documents.toMarkdown({ file: files[0] })
-    console.log('=== [ECHO-MARKDOWN FULL OUTPUT START] ===')
-    console.log(markdown)
-    console.log('=== [ECHO-MARKDOWN FULL OUTPUT END] ===')
     return e.json(200, {
       markdown,
       truncated,

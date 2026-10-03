@@ -681,16 +681,17 @@ function tryParseTransactionLine(
  * ao invés de uma fatura de cartão de crédito.
  */
 export function isNuAccountStatementDoc(fullText: string, lines: string[]): boolean {
+  const cleanFull = fullText.replace(/[*_#]/g, ' ')
   const hasNuBrand =
-    /nu\s+pagamentos|nu\s+financeira|nubank/i.test(fullText) ||
-    lines.some((l) => /nu\s+pagamentos|nu\s+financeira/i.test(l))
+    /nu\s+pagamentos|nu\s+financeira|nubank/i.test(cleanFull) ||
+    lines.some((l) => /nu\s+pagamentos|nu\s+financeira|nubank/i.test(l.replace(/[*_#]/g, ' ')))
   const hasStatementMarkers =
-    /total\s+de\s+sa[íi]das|total\s+de\s+entradas|rendimento\s+l[íi]quido|saldo\s+inicial|saldo\s+final\s+do\s+per[íi]odo/i.test(
-      fullText,
+    /total\s+de\s+sa[íi]das|total\s+de\s+entradas|rendimento\s+l[íi]quido|saldo\s+inicial|saldo\s+final/i.test(
+      cleanFull,
     )
   const hasMovimentacoes =
-    /movimenta[çc][õo]es/i.test(fullText) ||
-    lines.some((l) => /^movimenta[çc][õo]es$/i.test(l.trim()))
+    /movimenta[çc][õo]es/i.test(cleanFull) ||
+    lines.some((l) => /movimenta[çc][õo]es/i.test(l.replace(/[*_#]/g, ' ').trim()))
   return hasNuBrand && (hasStatementMarkers || hasMovimentacoes)
 }
 
@@ -768,17 +769,21 @@ export function parseNuAccountStatement(
   // Regex para cabeçalho de dia no extrato:
   // "01 SET 2026 Total de saídas - 1.763,28"
   // "03 SET 2026 Total de entradas + 2.600,00"
-  // "01 SET 2026"
+  // "01 SET 2026" ou "20 SET 2026 **Total de saídas- 278,77**"
   const dayHeaderRegex =
-    /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+total\s+de\s+(sa[íi]das|entradas)\s*[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}))?/i
+    /^(?:#+\s*|\*\*)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\*{2})?(?:\s+(?:total\s+de\s+|[#*]*\s*total\s+de\s+)(sa[íi]das|entradas)\s*[-+–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}))?/i
 
-  // Regex para sub-seção do dia (ex: "Total de saídas - 515,00")
+  // Regex para sub-seção do dia (ex: "Total de saídas - 515,00" ou "|Total de saídas||- 515,00|")
   const subSectionRegex =
-    /^total\s+de\s+(sa[íi]das|entradas)\s*[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i
+    /^[|#*\s]*total\s+de\s+(sa[íi]das|entradas)[|#*\s]*[-+–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})[|#*\s]*$/i
 
   // Linhas que são ruído ou metadados de rodapé / cabeçalho repetido
   const isNuNoise = (l: string) => {
-    const low = l.toLowerCase().trim()
+    const clean = l
+      .replace(/[*_#|]/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+    const low = clean.toLowerCase()
     if (!low) return true
     if (/^ver[oó]nica\s+de\s+souza\s+carraro/i.test(low)) return true
     if (/^cpf\s+•••/i.test(low)) return true
@@ -797,32 +802,61 @@ export function parseNuAccountStatement(
     if (/nu\s+financeira\s+s\.a\./i.test(low)) return true
     if (/cnpj:\s*\d{2}\.\d{3}\.\d{3}/i.test(low)) return true
     if (/^\d+\s+de\s+\d+$/i.test(low)) return true
+    if (/^[-|\s]+$/.test(l)) return true // separadores markdown tipo |---|---|---|
     return false
   }
 
   // Linhas que iniciam um novo lançamento
   const isTransactionStart = (l: string) => {
-    const t = l.trim()
+    const clean = l.replace(/^[|*\s]+/, '')
     return /^(transfer[eê]ncia\s+enviada\s+pelo\s+pix|transfer[eê]ncia\s+recebida\s+pelo\s+pix|compra\s+no\s+d[eé]bito|pagamento\s+de\s+fatura|pagamento\s+de\s+boleto|d[eé]bito\s+em\s+conta|estorno|reembolso|dep[oó]sito)/i.test(
-      t,
+      clean,
     )
   }
 
-  // Valor isolado numa linha: ex: "1.250,00" ou "-50,00" ou "+2.600,00"
+  // Valor isolado numa linha: ex: "1.250,00" ou "-50,00" ou "+2.600,00" ou "|2.600,00|"
   const isIsolatedAmountLine = (l: string) => {
-    return /^[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/.test(l.trim())
+    const clean = l.replace(/^[|*\s]+|[|*\s]+$/g, '').trim()
+    return /^[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/.test(clean)
   }
 
   // Extrai valor do final da linha
   // Ex: "Transferência enviada pelo Pix ... NU 50,00" -> amount = 50.00
+  // Também suporta tabelas markdown: "|Transferência enviada pelo Pix|Fulano ...|50,00|"
   const extractTrailingAmount = (l: string) => {
+    // 1. Tabela markdown: | Col1 | Col2 | Valor | ou | Col1 | Valor |
+    if (l.includes('|')) {
+      const parts = l
+        .split('|')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+      if (parts.length >= 2) {
+        const lastPart = parts[parts.length - 1]
+        const amtMatch = lastPart.match(/^[-+–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/)
+        if (amtMatch) {
+          const rawNum = amtMatch[1].replace(/\./g, '').replace(',', '.')
+          const parsed = parseFloat(rawNum)
+          if (!isNaN(parsed) && parsed > 0) {
+            const desc = parts.slice(0, parts.length - 1).join(' - ')
+            return {
+              description: desc,
+              amount: parsed,
+              isNegative: lastPart.includes('-'),
+              rawAmount: lastPart,
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Linha corrida de texto: "Desc 50,00"
     const m = l.match(/^(.*?)\s+([-+]?\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/)
     if (!m) return null
-    const desc = m[1].trim()
+    const desc = m[1].replace(/^[|*\s]+|[|*\s]+$/g, '').trim()
     const rawVal = m[2].trim()
     const isNeg = rawVal.startsWith('-')
     const cleanNum = rawVal
-      .replace(/^[-+]\s*/, '')
+      .replace(/^[-+–—]\s*/, '')
       .replace(/\./g, '')
       .replace(',', '.')
     const parsed = parseFloat(cleanNum)
@@ -1045,9 +1079,35 @@ export function parsePDFStatement(
 ): PDFParseResult {
   // 1. Verificar se é extrato de conta corrente Nubank
   if (isNuAccountStatementDoc(fullText, lines)) {
-    return parseNuAccountStatement(lines, fullText, preferredYear)
+    const nuResult = parseNuAccountStatement(lines, fullText, preferredYear)
+    // Se identificou como extrato Nu com sucesso (encontrou transações), retorna direto
+    if (nuResult.transactions.length > 0) {
+      return nuResult
+    }
+    // Se o detector Nu casou mas parseNuAccountStatement não encontrou transações,
+    // tentamos também o pipeline de faturas/padrão como fallback antes de desistir
+    const fallbackResult = parseStandardStatement(
+      lines,
+      fullText,
+      preferredYear,
+      userDefaultCurrency,
+    )
+    if (fallbackResult.transactions.length > 0) {
+      return fallbackResult
+    }
+    // Retorna o resultado Nu com detalhes
+    return nuResult
   }
 
+  return parseStandardStatement(lines, fullText, preferredYear, userDefaultCurrency)
+}
+
+function parseStandardStatement(
+  lines: string[],
+  fullText: string,
+  preferredYear?: number,
+  userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
+): PDFParseResult {
   const detectedYear = preferredYear || inferDocumentYear(fullText)
   const currencyDetection = detectDocumentCurrency(fullText, userDefaultCurrency)
   const detectedCurrency = currencyDetection.currency
