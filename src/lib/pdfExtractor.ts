@@ -4,6 +4,7 @@
  */
 import * as pdfjsLib from 'pdfjs-dist'
 import pb from './pocketbase/client'
+import fs from 'node:fs'
 
 /**
  * Inicialização robusta e à prova de falhas do worker do PDF.js.

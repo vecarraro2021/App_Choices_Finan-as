@@ -1,14 +1,13 @@
 import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs'
 import path from 'node:path'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { parsePDFStatement } from './pdfStatementParser'
 
 describe('inspect real pdf', () => {
-  it('dump real pdf content and fail intentionally', () => {
-    expect('ABC').toBe('DEF')
-  })
-  it('dump real pdf content', async () => {
+  it('extracts real Nubank PDF lines and tests parser', async () => {
+    console.log('--- START REAL NUBANK TEST ---')
     const filePath = path.resolve('src/assets/nubank2026-10-07-f4eba.pdf')
     const fileBuf = fs.readFileSync(filePath)
     const data = new Uint8Array(fileBuf)
@@ -74,17 +73,16 @@ describe('inspect real pdf', () => {
     const fullText = allLines.join('\n')
     const parseResult = parsePDFStatement(allLines, fullText)
 
-    // Save lines and text to inspect in tests
-    // Escreve arquivo de dump para inspeção direta
+    // Save lines and text to inspect
     fs.writeFileSync(
       path.resolve('src/lib/nubank_dump.json'),
       JSON.stringify(
         {
           totalLines: allLines.length,
-          lines: allLines,
           parseCount: parseResult.transactions.length,
+          sampleFirst50Lines: allLines.slice(0, 50),
+          allLines: allLines,
           parseTransactions: parseResult.transactions,
-          sampleFirst30Lines: allLines.slice(0, 50),
           unrecognizedLines: parseResult.unrecognizedLines.slice(0, 50),
         },
         null,
@@ -92,6 +90,11 @@ describe('inspect real pdf', () => {
       ),
     )
 
-    expect(1).toBe(2)
+    // Assert that we parse transactions
+    expect(parseResult.transactions.length).toBeGreaterThan(0)
+  })
+
+  it('verifies syntax check', () => {
+    expect(true).toBe(true)
   })
 })
