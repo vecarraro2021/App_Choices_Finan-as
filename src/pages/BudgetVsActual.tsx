@@ -27,7 +27,6 @@ import {
   DollarSign,
   TrendingDown,
   GripVertical,
-  MoveRight,
   CornerDownRight,
   Download,
   ListFilter,
@@ -46,7 +45,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { CategorySelectCombobox } from '@/components/CategorySelectCombobox'
 
 export default function BudgetVsActualView() {
   const { user, currency } = useAuth()
@@ -62,11 +60,6 @@ export default function BudgetVsActualView() {
   // Drag and Drop state
   const [draggedSubId, setDraggedSubId] = useState<string | null>(null)
   const [dragOverMainId, setDragOverMainId] = useState<string | null>(null)
-
-  // Move Subcategory Modal (Mobile / Accessibility / Action button)
-  const [movingSubCategory, setMovingSubCategory] = useState<Category | null>(null)
-  const [targetParentId, setTargetParentId] = useState<string>('')
-  const [moving, setMoving] = useState(false)
 
   // Detail Drawer state for line item breakdown
   const [detailCategory, setDetailCategory] = useState<Category | null>(null)
@@ -340,27 +333,6 @@ export default function BudgetVsActualView() {
 
     if (!subId) return
     await handleMoveSubCategory(subId, targetMainId)
-  }
-
-  // Open Move Dialog (Mobile / Actions / Accessibility)
-  const handleOpenMove = (sub: Category) => {
-    setMovingSubCategory(sub)
-    const currentParentId = sub.parent
-    const otherMain = categories.find((m) => m.type === 'main' && m.id !== currentParentId)
-    setTargetParentId(otherMain ? otherMain.id : '')
-  }
-
-  const handleConfirmMove = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!movingSubCategory || !targetParentId) return
-
-    setMoving(true)
-    try {
-      await handleMoveSubCategory(movingSubCategory.id, targetParentId)
-      setMovingSubCategory(null)
-    } finally {
-      setMoving(false)
-    }
   }
 
   // Open Edit Estimate Modal
@@ -1006,18 +978,6 @@ export default function BudgetVsActualView() {
                                       className="h-5 w-5 text-slate-400 hover:text-blue-600"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        if (foundSub) handleOpenMove(foundSub)
-                                      }}
-                                      title="Mover para outra categoria..."
-                                    >
-                                      <MoveRight className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-5 w-5 text-slate-400 hover:text-blue-600"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
                                         if (foundSub) handleOpenEstimateModal(foundSub)
                                       }}
                                       title="Editar orçamento estimado desta subcategoria"
@@ -1149,53 +1109,6 @@ export default function BudgetVsActualView() {
           </p>
         </div>
       </Card>
-
-      {/* MOVE SUBCATEGORY MODAL (Mobile / Accessible Alternative) */}
-      <Dialog
-        open={!!movingSubCategory}
-        onOpenChange={(open) => !open && setMovingSubCategory(null)}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MoveRight className="h-5 w-5 text-blue-600" />
-              Mover Subcategoria
-            </DialogTitle>
-            <DialogDescription>
-              Altere a categoria mãe de <strong>{movingSubCategory?.name}</strong> para reorganizar
-              a matriz orçamentária.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleConfirmMove} className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Nova Categoria Principal</Label>
-              <CategorySelectCombobox
-                categories={categories.filter((c) => c.type === 'main')}
-                value={targetParentId}
-                onChange={setTargetParentId}
-                excludeCategoryId={movingSubCategory?.parent}
-                placeholder="Selecione a categoria principal de destino"
-                searchPlaceholder="Buscar categoria principal..."
-                emptyText="Nenhuma categoria encontrada."
-              />
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => setMovingSubCategory(null)}>
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={moving || !targetParentId || targetParentId === movingSubCategory?.parent}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {moving ? 'Movendo...' : 'Mover Subcategoria'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       {/* EDIT ESTIMATE MODAL */}
       <Dialog open={!!editingCategory} onOpenChange={(open) => !open && setEditingCategory(null)}>
