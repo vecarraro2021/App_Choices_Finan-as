@@ -1,24 +1,23 @@
-import { describe, it, expect } from 'vitest'
-
+import { describe, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parsePDFStatement } from './pdfStatementParser'
 
-describe('inspect real pdf', () => {
-  it('extracts real Nubank PDF lines and tests parser', async () => {
-    console.log('--- START REAL NUBANK TEST ---')
-    const filePath = path.resolve('src/assets/nu76223058401set202630set2026-b97da.pdf')
-    const fileBuf = fs.readFileSync(filePath)
-    const data = new Uint8Array(fileBuf)
+import { expect } from 'vitest'
+
+describe('extract text from nu statement pdf using pdfjs', () => {
+  it('extracts all lines and inspects them', async () => {
+    const pdfPath = path.resolve('src/assets/nu76223058401set202630set2026-b97da.pdf')
+    expect(fs.existsSync(pdfPath)).toBe(true)
+    const buffer = fs.readFileSync(pdfPath)
     const doc = await pdfjsLib.getDocument({
-      data,
+      data: new Uint8Array(buffer),
       useWorkerFetch: false,
       isEvalSupported: false,
       useSystemFonts: true,
     }).promise
 
-    expect(doc.numPages).toBeGreaterThan(0)
+    const pages: Array<{ pageNumber: number; lines: string[] }> = []
     const allLines: string[] = []
 
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
@@ -47,6 +46,7 @@ describe('inspect real pdf', () => {
       }
 
       const sortedYKeys = Array.from(lineBuckets.keys()).sort((a, b) => b - a)
+      const pageLines: string[] = []
       for (const y of sortedYKeys) {
         const rowItems = lineBuckets.get(y)!
         rowItems.sort((a, b) => a.x - b.x)
@@ -65,32 +65,18 @@ describe('inspect real pdf', () => {
           }
         }
         if (lineText.trim()) {
+          pageLines.push(lineText.trim())
           allLines.push(lineText.trim())
         }
       }
+      pages.push({ pageNumber: pageNum, lines: pageLines })
     }
 
-    const fullText = allLines.join('\n')
-    const parseResult = parsePDFStatement(allLines, fullText)
-
-    // Save lines and text to inspect
-    fs.writeFileSync(
-      path.resolve('src/lib/nubank_dump.json'),
-      JSON.stringify(
-        {
-          totalLines: allLines.length,
-          parseCount: parseResult.transactions.length,
-          allLines: allLines,
-        },
-        null,
-        2,
-      ),
-    )
-
-    expect(`Lines count: ${allLines.length}, first 5 lines: ${JSON.stringify(allLines.slice(0, 5))}`).toBe('FAIL')
-  })
-
-  it('verifies syntax check', () => {
-    expect(true).toBe(true)
+    const dumpContent = `// Auto-generated extraction of user Nu Extrato PDF
+export const NU_STATEMENT_PAGES = ${JSON.stringify(pages, null, 2)} as const;
+export const NU_STATEMENT_LINES = ${JSON.stringify(allLines, null, 2)} as const;
+export const NU_STATEMENT_FULL_TEXT = ${JSON.stringify(allLines.join('\n'))} as const;
+`
+    expect(allLines.length).toBe(0) // intentionally fail to see error and console
   })
 })
