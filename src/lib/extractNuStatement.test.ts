@@ -77,6 +77,7 @@ export const NU_STATEMENT_PAGES = ${JSON.stringify(pages, null, 2)} as const;
 export const NU_STATEMENT_LINES = ${JSON.stringify(allLines, null, 2)} as const;
 export const NU_STATEMENT_FULL_TEXT = ${JSON.stringify(allLines.join('\n'))} as const;
 `
-    expect(allLines.length).toBe(0) // intentionally fail to see error and console
+    fs.writeFileSync(path.resolve('src/lib/nuStatementDump.ts'), dumpContent, 'utf8')
+    expect(allLines.length).toBeGreaterThan(0)
   })
 })

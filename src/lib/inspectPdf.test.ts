@@ -87,7 +87,7 @@ describe('inspect real pdf', () => {
       ),
     )
 
-    expect(`Lines count: ${allLines.length}, first 5 lines: ${JSON.stringify(allLines.slice(0, 5))}`).toBe('FAIL')
+    expect(allLines.length).toBeGreaterThan(0)
   })
 
   it('verifies syntax check', () => {
