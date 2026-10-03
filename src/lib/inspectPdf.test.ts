@@ -5,6 +5,9 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { parsePDFStatement } from './pdfStatementParser'
 
 describe('inspect real pdf', () => {
+  it('dump real pdf content and fail intentionally', () => {
+    expect('ABC').toBe('DEF')
+  })
   it('dump real pdf content', async () => {
     const filePath = path.resolve('src/assets/nubank2026-10-07-f4eba.pdf')
     const fileBuf = fs.readFileSync(filePath)
@@ -72,6 +75,7 @@ describe('inspect real pdf', () => {
     const parseResult = parsePDFStatement(allLines, fullText)
 
     // Save lines and text to inspect in tests
+    // Escreve arquivo de dump para inspeção direta
     fs.writeFileSync(
       path.resolve('src/lib/nubank_dump.json'),
       JSON.stringify(
@@ -80,12 +84,14 @@ describe('inspect real pdf', () => {
           lines: allLines,
           parseCount: parseResult.transactions.length,
           parseTransactions: parseResult.transactions,
+          sampleFirst30Lines: allLines.slice(0, 50),
+          unrecognizedLines: parseResult.unrecognizedLines.slice(0, 50),
         },
         null,
         2,
       ),
     )
 
-    expect(allLines.length).toBe(0) // intentionally fail to see parseCount and sample lines
+    expect(1).toBe(2)
   })
 })

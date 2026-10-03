@@ -101,6 +101,7 @@ async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<Extr
     if (!md || md.trim().length === 0) {
       return null
     }
+    console.log('[pdfExtractor] Recebido do backend markdown com tamanho:', md.length)
 
     const lines = md
       .split(/\r?\n/)

@@ -13,7 +13,7 @@ routerAdd('POST', '/backend/v1/documentos/convert-pdf', (e) => {
       'Tamanho markdown:',
       mdStr.length,
     )
-    console.log('[convert_pdf] Amostra markdown (primeiros 500 chars):', mdStr.slice(0, 500))
+    console.log('[convert_pdf] Amostra markdown (primeiros 1500 chars):', mdStr.slice(0, 1500))
     return e.json(200, {
       markdown: mdStr,
       truncated: Boolean(truncated),
@@ -27,6 +27,11 @@ routerAdd('POST', '/backend/v1/documentos/convert-pdf', (e) => {
     }
     throw err
   }
+})
+
+routerAdd('GET', '/backend/v1/inspect-nubank-test', (e) => {
+  // Rota auxiliar temporária para inspecionar ou verificar backend
+  return e.json(200, { ok: true })
 })
 
 routerAdd('POST', '/backend/v1/documentos/echo-markdown', (e) => {
