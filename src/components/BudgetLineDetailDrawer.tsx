@@ -351,7 +351,7 @@ export function BudgetLineDetailDrawer({
                         {subName && (
                           <Badge
                             variant="outline"
-                            className="text-[10px] py-0 px-1.5 font-medium border-slate-200 bg-slate-50 text-slate-600"
+                            className="text-[10px] py-0 px-1.5 font-medium border-slate-200 bg-slate-50 text-slate-600 truncate max-w-[180px]"
                             title={`Lançamento vinculado à subcategoria ${subName}`}
                           >
                             ↳ {subName}
@@ -360,22 +360,17 @@ export function BudgetLineDetailDrawer({
                       </div>
 
                       <p
-                        className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-700 transition-colors"
-                        title={tx.description}
+                        className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-700 transition-colors block w-full"
+                        title={tx.description || 'Sem descrição'}
                       >
                         {tx.description || 'Sem descrição'}
                       </p>
                     </div>
 
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 pl-3">
                       <div className="font-bold text-sm text-slate-900 tabular-nums">
                         {formatCurrency(amtBrl, currency, monthRate)}
                       </div>
-                      {currency === 'EUR' && (
-                        <div className="text-[10px] text-slate-400 tabular-nums">
-                          R$ {amtBrl.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </div>
-                      )}
                     </div>
                   </div>
                 )
