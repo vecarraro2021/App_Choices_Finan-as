@@ -360,7 +360,7 @@ export function BudgetLineDetailDrawer({
                       </div>
 
                       <p
-                        className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-700 transition-colors block w-full"
+                        className="text-xs font-semibold text-slate-900 truncate overflow-hidden group-hover:text-blue-700 transition-colors"
                         title={tx.description || 'Sem descrição'}
                       >
                         {tx.description || 'Sem descrição'}
