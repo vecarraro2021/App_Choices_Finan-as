@@ -8,36 +8,9 @@ import {
 } from './diagnosticEngine'
 
 describe('Bússola Financeira - Diagnostic Engine', () => {
-  it('contém exatamente 16 perguntas e 5 seções', async () => {
-    const fsMod = ['f', 's'].join('')
-    const pathMod = ['p', 'a', 't', 'h'].join('')
-    const zlibMod = ['z', 'l', 'i', 'b'].join('')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodeFs: any = await import(/* @vite-ignore */ fsMod)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodePath: any = await import(/* @vite-ignore */ pathMod)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodeZlib: any = await import(/* @vite-ignore */ zlibMod)
-
-    const headContent = nodeFs.readFileSync(nodePath.resolve('.git/HEAD'), 'utf8')
-    let refPath = headContent.trim()
-    if (refPath.startsWith('ref: ')) {
-      refPath = refPath.replace('ref: ', '')
-    }
-    let currentRef = ''
-    try {
-      currentRef = nodeFs.readFileSync(nodePath.resolve('.git', refPath), 'utf8')
-    } catch (e: any) {
-      currentRef = 'ERR:' + e.message
-    }
-    let logs = ''
-    try {
-      logs = nodeFs.readFileSync(nodePath.resolve('.git/logs/HEAD'), 'utf8')
-    } catch (e: any) {
-      logs = 'ERR_LOGS:' + e.message
-    }
-    const info = `HEAD=${headContent} | REF=${currentRef} | LOGS=${logs}`
-    throw new Error(info)
+  it('contém exatamente 16 perguntas e 5 seções', () => {
+    expect(DIAGNOSTIC_QUESTIONS).toHaveLength(16)
+    expect(DIAGNOSTIC_SECTIONS).toHaveLength(5)
   })
 
   it('inverte corretamente as perguntas 2, 7, 11, 12 e 16', () => {

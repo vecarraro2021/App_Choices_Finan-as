@@ -1,12 +1,61 @@
-import { describe, it } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { parsePDFStatement } from './pdfStatementParser'
+import { NU_STATEMENT_LINES, NU_STATEMENT_FULL_TEXT } from './nuStatementDump'
 
-import { expect } from 'vitest'
+describe('extractNuStatement - Parser do Extrato Nu real', () => {
+  it('parsa as linhas estáticas da fixture do Extrato Nu e bate os totais reais', () => {
+    const lines = [...NU_STATEMENT_LINES]
+    const fullText = NU_STATEMENT_FULL_TEXT
+    const result = parsePDFStatement(lines, fullText)
 
-describe('extract text from nu statement pdf using pdfjs', () => {
-  it('extracts all lines and inspects them', async () => {
+    expect(result.isNuAccountStatement).toBe(true)
+    expect(result.transactions.length).toBeGreaterThan(0)
+
+    const debits = result.transactions.filter((tx) => tx.type === 'debit')
+    const credits = result.transactions.filter((tx) => tx.type === 'credit')
+
+    const sumDebits = debits.reduce((acc, tx) => acc + tx.amount, 0)
+    const sumCredits = credits.reduce((acc, tx) => acc + tx.amount, 0)
+
+    console.log('Parsed transactions count:', result.transactions.length)
+    console.log('Debits count:', debits.length, 'Sum:', sumDebits.toFixed(2))
+    console.log('Credits count:', credits.length, 'Sum:', sumCredits.toFixed(2))
+    console.log('Unrecognized lines count:', result.unrecognizedLines.length)
+
+    // TOTAIS REAIS DO ARQUIVO: saídas = 9.030,98; entradas = 7.523,11 (BRL)
+    expect(Number(sumDebits.toFixed(2))).toBe(9030.98)
+    expect(Number(sumCredits.toFixed(2))).toBe(7523.11)
+
+    // Lançamentos específicos reconhecidos
+    // 1. Pagamento de fatura: 1.257,28
+    const faturaTx = result.transactions.find((tx) => tx.description.includes('Pagamento de fatura'))
+    expect(faturaTx).toBeDefined()
+    expect(faturaTx?.amount).toBe(1257.28)
+    expect(faturaTx?.type).toBe('debit')
+
+    // 2. Compra no débito JIM.COM: 6,00
+    const debitoTx = result.transactions.find((tx) => tx.description.includes('JIM.COM'))
+    expect(debitoTx).toBeDefined()
+    expect(debitoTx?.amount).toBe(6.0)
+    expect(debitoTx?.type).toBe('debit')
+
+    // 3. Pix enviado com valor: Camila Sousa 50,00
+    const pixCamila = result.transactions.find((tx) => tx.description.includes('Camila Sousa da Silva'))
+    expect(pixCamila).toBeDefined()
+    expect(pixCamila?.amount).toBe(50.0)
+    expect(pixCamila?.type).toBe('debit')
+
+    // 4. Pix recebido: VERONICA DE SOUZA CARRARO LTDA 2.600,00
+    const pixRecebido = result.transactions.find((tx) => tx.description.includes('VERONICA DE SOUZA CARRARO LTDA'))
+    expect(pixRecebido).toBeDefined()
+    expect(pixRecebido?.amount).toBe(2600.0)
+    expect(pixRecebido?.type).toBe('credit')
+  })
+
+  it('extrai diretamente do arquivo PDF fixture e valida integridade end-to-end', async () => {
     const pdfPath = path.resolve('src/assets/nu76223058401set202630set2026-b97da.pdf')
     expect(fs.existsSync(pdfPath)).toBe(true)
     const buffer = fs.readFileSync(pdfPath)
@@ -17,9 +66,7 @@ describe('extract text from nu statement pdf using pdfjs', () => {
       useSystemFonts: true,
     }).promise
 
-    const pages: Array<{ pageNumber: number; lines: string[] }> = []
     const allLines: string[] = []
-
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
       const page = await doc.getPage(pageNum)
       const textContent = await page.getTextContent()
@@ -46,7 +93,6 @@ describe('extract text from nu statement pdf using pdfjs', () => {
       }
 
       const sortedYKeys = Array.from(lineBuckets.keys()).sort((a, b) => b - a)
-      const pageLines: string[] = []
       for (const y of sortedYKeys) {
         const rowItems = lineBuckets.get(y)!
         rowItems.sort((a, b) => a.x - b.x)
@@ -65,19 +111,23 @@ describe('extract text from nu statement pdf using pdfjs', () => {
           }
         }
         if (lineText.trim()) {
-          pageLines.push(lineText.trim())
           allLines.push(lineText.trim())
         }
       }
-      pages.push({ pageNumber: pageNum, lines: pageLines })
     }
 
-    const dumpContent = `// Auto-generated extraction of user Nu Extrato PDF
-export const NU_STATEMENT_PAGES = ${JSON.stringify(pages, null, 2)} as const;
-export const NU_STATEMENT_LINES = ${JSON.stringify(allLines, null, 2)} as const;
-export const NU_STATEMENT_FULL_TEXT = ${JSON.stringify(allLines.join('\n'))} as const;
-`
-    fs.writeFileSync(path.resolve('src/lib/nuStatementDump.ts'), dumpContent, 'utf8')
-    expect(allLines.length).toBeGreaterThan(0)
+    const fullText = allLines.join('\n')
+    const result = parsePDFStatement(allLines, fullText)
+
+    expect(result.isNuAccountStatement).toBe(true)
+    const sumDebits = result.transactions
+      .filter((tx) => tx.type === 'debit')
+      .reduce((acc, tx) => acc + tx.amount, 0)
+    const sumCredits = result.transactions
+      .filter((tx) => tx.type === 'credit')
+      .reduce((acc, tx) => acc + tx.amount, 0)
+
+    expect(Number(sumDebits.toFixed(2))).toBe(9030.98)
+    expect(Number(sumCredits.toFixed(2))).toBe(7523.11)
   })
 })

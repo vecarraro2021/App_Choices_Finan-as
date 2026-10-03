@@ -34,6 +34,9 @@ export interface PDFParseResult {
   detectedPeriodLabel?: string // Ex: "31 AGO a 30 SET"
   detectedDueDate?: string // Ex: "07 OUT 2026" ou "07/10/2026"
   isCreditCardInvoice?: boolean
+  isNuAccountStatement?: boolean
+  totalDebits?: number
+  totalCredits?: number
   extractionFailureType?: 'empty_text' | 'no_match' | 'worker_error'
 }
 
@@ -673,12 +676,378 @@ function tryParseTransactionLine(
  * Executa o parsing completo de um extrato ou fatura em PDF a partir de suas linhas de texto.
  * Agrupa descrições em múltiplas linhas e ignora cabeçalhos/rodapés.
  */
+/**
+ * Detecta se o arquivo é um EXTRATO de conta corrente Nubank (Nu Pagamentos)
+ * ao invés de uma fatura de cartão de crédito.
+ */
+export function isNuAccountStatementDoc(fullText: string, lines: string[]): boolean {
+  const hasNuBrand =
+    /nu\s+pagamentos|nu\s+financeira|nubank/i.test(fullText) ||
+    lines.some((l) => /nu\s+pagamentos|nu\s+financeira/i.test(l))
+  const hasStatementMarkers =
+    /total\s+de\s+sa[íi]das|total\s+de\s+entradas|rendimento\s+l[íi]quido|saldo\s+inicial|saldo\s+final\s+do\s+per[íi]odo/i.test(
+      fullText,
+    )
+  const hasMovimentacoes =
+    /movimenta[çc][õo]es/i.test(fullText) ||
+    lines.some((l) => /^movimenta[çc][õo]es$/i.test(l.trim()))
+  return hasNuBrand && (hasStatementMarkers || hasMovimentacoes)
+}
+
+/**
+ * Parser especializado para o Extrato da conta Nu (Nu Pagamentos).
+ *
+ * Estrutura identificada:
+ * - Cabeçalho de período: "01 DE SETEMBRO DE 2026 a 30 DE SETEMBRO DE 2026 VALORES EM R$"
+ * - Totais de controle: "Total de entradas +7.523,11", "Total de saídas -9.030,98"
+ * - Cabeçalhos de dia: "01 SET 2026 Total de saídas - 1.763,28" ou "03 SET 2026 Total de entradas + 2.600,00"
+ * - Sub-seção no mesmo dia: "Total de saídas - 515,00" (mantém a data do dia corrente)
+ * - Lançamentos com valor no final da própria linha:
+ *     "Pagamento de fatura 1.257,28"
+ *     "Compra no débito JIM.COM* 62948758 MAYR 6,00"
+ *     "Transferência enviada pelo Pix Camila Sousa da Silva - •••.625.463-•• - NU 50,00"
+ * - Quebras em linhas subsequentes contendo metadados de agência/conta/banco
+ * - Lançamentos onde a descrição termina e o valor está isolado na linha seguinte
+ * - Lançamentos recebidos: "Transferência recebida pelo Pix ..."
+ */
+export function parseNuAccountStatement(
+  lines: string[],
+  fullText: string,
+  preferredYear?: number,
+): PDFParseResult {
+  const detectedYear = preferredYear || inferDocumentYear(fullText)
+  const transactions: PDFParsedTransaction[] = []
+  const unrecognizedLines: string[] = []
+
+  // Extrair período e competência do cabeçalho
+  // Ex: "01 DE SETEMBRO DE 2026 a 30 DE SETEMBRO DE 2026 VALORES EM R$"
+  let periodLabel = '01 SET a 30 SET'
+  let competenceMonth: string | undefined = undefined
+
+  const periodMatch = fullText.match(
+    /(\d{1,2}\s+(?:DE\s+)?([A-Za-zçÇ]{3,9})\s+(?:DE\s+)?(\d{4}))\s+(?:a|at[eé]|-)\s+(\d{1,2}\s+(?:DE\s+)?([A-Za-zçÇ]{3,9})\s+(?:DE\s+)?(\d{4}))/i,
+  )
+
+  if (periodMatch) {
+    const startStr = periodMatch[1]
+    const endStr = periodMatch[4]
+    const endMonthWord = periodMatch[5]
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+    const endYearStr = periodMatch[6]
+    const m = PT_MONTHS[endMonthWord] || PT_MONTHS[endMonthWord.slice(0, 3)]
+    if (m && endYearStr) {
+      competenceMonth = `${endYearStr}-${m}`
+    }
+    periodLabel = `${startStr} a ${endStr}`
+  }
+
+  // Extrair totais de controle se disponíveis no cabeçalho
+  let docTotalDebits: number | undefined = undefined
+  let docTotalCredits: number | undefined = undefined
+
+  const saídasMatch = fullText.match(
+    /total\s+de\s+sa[íi]das\s*[-–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i,
+  )
+  if (saídasMatch) {
+    const rawNum = saídasMatch[1].replace(/\./g, '').replace(',', '.')
+    const parsed = parseFloat(rawNum)
+    if (!isNaN(parsed)) docTotalDebits = parsed
+  }
+
+  const entradasMatch = fullText.match(
+    /total\s+de\s+entradas\s*[+–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i,
+  )
+  if (entradasMatch) {
+    const rawNum = entradasMatch[1].replace(/\./g, '').replace(',', '.')
+    const parsed = parseFloat(rawNum)
+    if (!isNaN(parsed)) docTotalCredits = parsed
+  }
+
+  // Regex para cabeçalho de dia no extrato:
+  // "01 SET 2026 Total de saídas - 1.763,28"
+  // "03 SET 2026 Total de entradas + 2.600,00"
+  // "01 SET 2026"
+  const dayHeaderRegex =
+    /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+total\s+de\s+(sa[íi]das|entradas)\s*[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}))?/i
+
+  // Regex para sub-seção do dia (ex: "Total de saídas - 515,00")
+  const subSectionRegex =
+    /^total\s+de\s+(sa[íi]das|entradas)\s*[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})/i
+
+  // Linhas que são ruído ou metadados de rodapé / cabeçalho repetido
+  const isNuNoise = (l: string) => {
+    const low = l.toLowerCase().trim()
+    if (!low) return true
+    if (/^ver[oó]nica\s+de\s+souza\s+carraro/i.test(low)) return true
+    if (/^cpf\s+•••/i.test(low)) return true
+    if (/^\d{7,9}-\d$/i.test(low) && !low.includes(' ')) return true // ex: "76223058-4" no topo da página
+    if (/valores\s+em\s+r\$/i.test(low)) return true
+    if (/^saldo\s+(inicial|final)/i.test(low)) return true
+    if (/^rendimento\s+l[íi]quido/i.test(low)) return true
+    if (/^r\$\s+[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}$/i.test(low)) return true
+    if (/^movimenta[çc][õo]es$/i.test(low)) return true
+    if (/tem\s+alguma\s+d[uú]vida/i.test(low)) return true
+    if (/caso\s+a\s+solu[çc][aã]o\s+fornecida/i.test(low)) return true
+    if (/extrato\s+gerado\s+dia/i.test(low)) return true
+    if (/o\s+saldo\s+l[íi]quido\s+corresponde/i.test(low)) return true
+    if (/n[aã]o\s+nos\s+responsabilizamos/i.test(low)) return true
+    if (/asseguramos\s+a\s+autenticidade/i.test(low)) return true
+    if (/nu\s+financeira\s+s\.a\./i.test(low)) return true
+    if (/cnpj:\s*\d{2}\.\d{3}\.\d{3}/i.test(low)) return true
+    if (/^\d+\s+de\s+\d+$/i.test(low)) return true
+    return false
+  }
+
+  // Linhas que iniciam um novo lançamento
+  const isTransactionStart = (l: string) => {
+    const t = l.trim()
+    return /^(transfer[eê]ncia\s+enviada\s+pelo\s+pix|transfer[eê]ncia\s+recebida\s+pelo\s+pix|compra\s+no\s+d[eé]bito|pagamento\s+de\s+fatura|pagamento\s+de\s+boleto|d[eé]bito\s+em\s+conta|estorno|reembolso|dep[oó]sito)/i.test(
+      t,
+    )
+  }
+
+  // Valor isolado numa linha: ex: "1.250,00" ou "-50,00" ou "+2.600,00"
+  const isIsolatedAmountLine = (l: string) => {
+    return /^[-+]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/.test(l.trim())
+  }
+
+  // Extrai valor do final da linha
+  // Ex: "Transferência enviada pelo Pix ... NU 50,00" -> amount = 50.00
+  const extractTrailingAmount = (l: string) => {
+    const m = l.match(/^(.*?)\s+([-+]?\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/)
+    if (!m) return null
+    const desc = m[1].trim()
+    const rawVal = m[2].trim()
+    const isNeg = rawVal.startsWith('-')
+    const cleanNum = rawVal
+      .replace(/^[-+]\s*/, '')
+      .replace(/\./g, '')
+      .replace(',', '.')
+    const parsed = parseFloat(cleanNum)
+    if (isNaN(parsed) || parsed === 0) return null
+    return {
+      description: desc,
+      amount: parsed,
+      isNegative: isNeg,
+      rawAmount: rawVal,
+    }
+  }
+
+  let currentYear = detectedYear
+  let currentNormDate = `${currentYear}-09-01`
+  let currentRawDate = '01 SET 2026'
+
+  // Estrutura de montagem de transação
+  interface BuildingTx {
+    date: string
+    rawDate: string
+    descriptionParts: string[]
+    amount?: number
+    type?: 'debit' | 'credit'
+    rawLines: string[]
+  }
+
+  let activeTx: BuildingTx | null = null
+
+  const commitActiveTx = () => {
+    if (!activeTx) return
+    if (activeTx.amount !== undefined && activeTx.amount > 0) {
+      const fullDesc = activeTx.descriptionParts
+        .join(' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+      const txType = activeTx.type || 'debit'
+      transactions.push({
+        id: `nu-tx-${transactions.length + 1}-${Math.random().toString(36).slice(2, 7)}`,
+        date: activeTx.date,
+        rawDate: activeTx.rawDate,
+        description: fullDesc,
+        amount: activeTx.amount,
+        currency: 'BRL',
+        type: txType,
+        rawLine: activeTx.rawLines.join(' | '),
+        month: activeTx.date.slice(0, 7),
+      })
+    } else {
+      unrecognizedLines.push(...activeTx.rawLines)
+    }
+    activeTx = null
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i].trim()
+    if (!rawLine) continue
+
+    // 1. Cabeçalho de dia (ex: "01 SET 2026 Total de saídas - 1.763,28")
+    const dayMatch = rawLine.match(dayHeaderRegex)
+    if (dayMatch) {
+      commitActiveTx()
+      const d = dayMatch[1].padStart(2, '0')
+      const mWord = dayMatch[2].toLowerCase()
+      const m = PT_MONTHS[mWord] || '09'
+      const y = parseInt(dayMatch[3], 10) || currentYear
+      currentYear = y
+      currentNormDate = `${y}-${m}-${d}`
+      currentRawDate = `${dayMatch[1]} ${dayMatch[2]} ${dayMatch[3]}`
+      continue
+    }
+
+    // 2. Sub-seção no mesmo dia (ex: "Total de saídas - 515,00")
+    if (subSectionRegex.test(rawLine)) {
+      commitActiveTx()
+      continue
+    }
+
+    // 3. Ignorar ruído Nu (cabeçalhos, rodapés, termos legais)
+    if (isNuNoise(rawLine)) {
+      // Se não estamos no meio de um lançamento ou se é ruído claro de rodapé, ignorar
+      if (!activeTx) {
+        continue
+      }
+      // Se estamos no meio de um lançamento e a linha é rodapé claro, fecha o lançamento
+      if (/extrato\s+gerado\s+dia|tem\s+alguma\s+d[uú]vida|cnpj:/i.test(rawLine)) {
+        commitActiveTx()
+        continue
+      }
+    }
+
+    // 4. Início de uma nova transação
+    if (isTransactionStart(rawLine)) {
+      commitActiveTx()
+
+      // Determinar tipo inicial
+      const isCredit = /transfer[eê]ncia\s+recebida|estorno|reembolso|dep[oó]sito/i.test(rawLine)
+      const trailing = extractTrailingAmount(rawLine)
+
+      if (trailing) {
+        // O valor já estava no final da linha!
+        activeTx = {
+          date: currentNormDate,
+          rawDate: currentRawDate,
+          descriptionParts: [trailing.description],
+          amount: trailing.amount,
+          type: isCredit ? 'credit' : 'debit',
+          rawLines: [rawLine],
+        }
+      } else {
+        // O valor virá na linha seguinte ou após quebras
+        activeTx = {
+          date: currentNormDate,
+          rawDate: currentRawDate,
+          descriptionParts: [rawLine],
+          type: isCredit ? 'credit' : 'debit',
+          rawLines: [rawLine],
+        }
+      }
+      continue
+    }
+
+    // 5. Linha subsequente: pode ser valor isolado ou continuação da descrição
+    if (activeTx) {
+      // Se o lançamento ainda NÃO tem valor definido e esta linha é um valor isolado
+      if (activeTx.amount === undefined && isIsolatedAmountLine(rawLine)) {
+        const clean = rawLine
+          .replace(/^[-+]\s*/, '')
+          .replace(/\./g, '')
+          .replace(',', '.')
+        const num = parseFloat(clean)
+        if (!isNaN(num) && num > 0) {
+          activeTx.amount = num
+          activeTx.rawLines.push(rawLine)
+          continue
+        }
+      }
+
+      // Se o lançamento ainda NÃO tem valor definido e a linha termina com um valor
+      if (activeTx.amount === undefined) {
+        const trailing = extractTrailingAmount(rawLine)
+        if (trailing) {
+          activeTx.descriptionParts.push(trailing.description)
+          activeTx.amount = trailing.amount
+          activeTx.rawLines.push(rawLine)
+          continue
+        }
+      }
+
+      // Se já tem valor definido ou ainda não encontrou o valor, verificar se é metadado Nu (agência/conta/banco)
+      // No extrato Nu, após o valor vêm dados como:
+      // "PAGAMENTOS - IP (0260) Agência: 1 Conta:"
+      // "67278091-1"
+      // "COOP SICREDI CEN OEST PAULISTA Agência:"
+      // "3022 Conta: 57701-4"
+      // Se já tem valor definido, linhas subsequentes que são contas bancárias podem ser concatenadas ou ignoradas.
+      // O mais limpo para descrição financeira pessoal é NÃO poluir o nome do recebedor com Agência e Conta bancária
+      // a menos que seja relevante.
+      if (activeTx.amount !== undefined) {
+        // Se a próxima linha parece um novo início ou cabeçalho, fecha
+        if (
+          isTransactionStart(rawLine) ||
+          dayHeaderRegex.test(rawLine) ||
+          subSectionRegex.test(rawLine) ||
+          isNuNoise(rawLine)
+        ) {
+          commitActiveTx()
+          // Re-processar esta linha
+          i--
+          continue
+        }
+
+        // Se é agência/conta subsequente, apenas anexamos aos rawLines para auditoria, sem poluir a descrição principal
+        activeTx.rawLines.push(rawLine)
+        continue
+      }
+
+      // Se ainda não tem valor e não foi valor isolado nem trailing, concatena como continuação do texto
+      activeTx.descriptionParts.push(rawLine)
+      activeTx.rawLines.push(rawLine)
+      continue
+    }
+
+    // Linha não associada a nenhuma transação
+    unrecognizedLines.push(rawLine)
+  }
+
+  commitActiveTx()
+
+  // Se não foi identificado competenceMonth no cabeçalho, usar o mês do primeiro lançamento
+  if (!competenceMonth && transactions.length > 0) {
+    competenceMonth = transactions[0].month
+  }
+
+  // Ordenar cronologicamente
+  transactions.sort((a, b) => a.date.localeCompare(b.date))
+
+  return {
+    transactions,
+    detectedYear,
+    detectedCurrency: 'BRL',
+    currencyConfidence: 'high',
+    currencyReason: 'Extrato de Conta Nubank identificado (valores em R$)',
+    totalLinesScanned: lines.length,
+    unrecognizedLines,
+    detectedCompetenceMonth: competenceMonth,
+    detectedPeriodLabel: periodLabel,
+    detectedDueDate: undefined, // Extrato não tem vencimento de fatura
+    isCreditCardInvoice: false,
+    isNuAccountStatement: true,
+    totalDebits: docTotalDebits,
+    totalCredits: docTotalCredits,
+  }
+}
+
 export function parsePDFStatement(
   lines: string[],
   fullText: string,
   preferredYear?: number,
   userDefaultCurrency: 'BRL' | 'EUR' = 'BRL',
 ): PDFParseResult {
+  // 1. Verificar se é extrato de conta corrente Nubank
+  if (isNuAccountStatementDoc(fullText, lines)) {
+    return parseNuAccountStatement(lines, fullText, preferredYear)
+  }
+
   const detectedYear = preferredYear || inferDocumentYear(fullText)
   const currencyDetection = detectDocumentCurrency(fullText, userDefaultCurrency)
   const detectedCurrency = currencyDetection.currency

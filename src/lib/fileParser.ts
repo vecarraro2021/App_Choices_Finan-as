@@ -88,7 +88,7 @@ export function detectTableCurrency(
   if (euroScore > 0 && euroScore > realScore) {
     return {
       currency: 'EUR',
-      confidence: euroScore >= 5 ? 'high' : 'medium',
+      confidence: euroScore >= 4 ? 'high' : 'medium',
       reason:
         euroSymbolCount > 0
           ? 'Identificado símbolo € / EUR nos valores'
@@ -244,10 +244,15 @@ export function parseAmount(val: string | number | undefined): number {
     .replace(/[R$\s€]/g, '')
     .trim()
 
-  // If contains comma as decimal separator
+  // If contains comma as decimal separator or thousands separator
   if (cleaned.includes(',') && cleaned.includes('.')) {
-    // Ex: 1.250,50
-    cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    if (cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+      // Ex: 1.250,50
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    } else {
+      // Ex: 1,250.50
+      cleaned = cleaned.replace(/,/g, '')
+    }
   } else if (cleaned.includes(',')) {
     // Ex: 1250,50
     cleaned = cleaned.replace(',', '.')
