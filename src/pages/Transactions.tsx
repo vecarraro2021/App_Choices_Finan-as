@@ -282,11 +282,19 @@ export default function TransactionsView() {
   const processPdfFile = async (file: File) => {
     try {
       setIsProcessingFile(true)
+      console.log(
+        '[PDF-Nu] [Transactions] Arquivo recebido:',
+        file.name,
+        'Tamanho:',
+        file.size,
+        'Tipo:',
+        file.type,
+      )
       let extracted: ExtractedPDF
       try {
         extracted = await extractTextFromPDF(file)
       } catch (extractErr: any) {
-        console.error('Falha de carregamento/leitura do PDF:', extractErr)
+        console.error('[PDF-Nu] [Transactions] Falha de carregamento/leitura do PDF:', extractErr)
         toast({
           title: 'Falha de carregamento/leitura do PDF',
           description: 'O leitor de PDF encontrou um erro ao processar o arquivo.',
@@ -295,7 +303,17 @@ export default function TransactionsView() {
         return
       }
 
+      console.log(
+        '[PDF-Nu] [Transactions] Extração concluída. Fonte:',
+        extracted.source,
+        'Páginas:',
+        extracted.totalPages,
+        'Tamanho do texto extraído:',
+        extracted.fullText?.length || 0,
+      )
+
       if (!extracted.fullText || extracted.fullText.trim().length === 0) {
+        console.warn('[PDF-Nu] [Transactions] Texto do PDF vazio ou ilegível.')
         toast({
           title: 'Não foi possível ler o texto do PDF',
           description:
@@ -307,9 +325,25 @@ export default function TransactionsView() {
 
       // Reunir todas as linhas de todas as páginas
       const allLines = extracted.pages.flatMap((p) => p.lines)
+      console.log(
+        `[PDF-Nu] [Transactions] Total de linhas agrupadas: ${allLines.length}. Chamando parsePDFStatement...`,
+      )
       const parseResult = parsePDFStatement(allLines, extracted.fullText)
 
+      console.log(
+        `[PDF-Nu] [Transactions] Resultado do parse: ${parseResult.transactions.length} transações encontradas. É extrato Nu? ${Boolean(
+          parseResult.isNuAccountStatement,
+        )}. É fatura de cartão? ${Boolean(parseResult.isCreditCardInvoice)}. Moeda: ${parseResult.detectedCurrency}. Mês de competência: ${parseResult.detectedCompetenceMonth}`,
+      )
+
       if (parseResult.transactions.length === 0) {
+        console.warn(
+          '[PDF-Nu] [Transactions] 0 transações identificadas. Detalhes de falha:',
+          parseResult.extractionFailureType,
+          parseResult.reason,
+          'Unrecognized lines count:',
+          parseResult.unrecognizedLines.length,
+        )
         if (parseResult.extractionFailureType === 'empty_text') {
           toast({
             title: 'Não foi possível ler o texto do PDF',

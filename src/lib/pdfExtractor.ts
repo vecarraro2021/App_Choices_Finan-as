@@ -86,6 +86,7 @@ async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<Extr
       headers['Authorization'] = `Bearer ${token}`
     }
 
+    console.log('[PDF-Nu] Iniciando tentativa de extração via backend Skip Cloud...')
     const res = await fetch(`${baseUrl}/backend/v1/documentos/convert-pdf`, {
       method: 'POST',
       body: formData,
@@ -93,16 +94,22 @@ async function extractViaBackend(fileOrBuffer: File | ArrayBuffer): Promise<Extr
     })
 
     if (!res.ok) {
-      console.warn('[pdfExtractor] Backend conversion retornou status:', res.status)
+      console.warn('[PDF-Nu] [pdfExtractor] Backend conversion retornou status:', res.status)
       return null
     }
 
     const data = await res.json()
     const md: string = data.markdown || ''
     if (!md || md.trim().length === 0) {
+      console.warn('[PDF-Nu] [pdfExtractor] Backend retornou markdown vazio.')
       return null
     }
-    console.log('[pdfExtractor] Recebido do backend markdown com tamanho:', md.length)
+    console.log(
+      '[PDF-Nu] [pdfExtractor] Backend conversion OK. Tamanho markdown:',
+      md.length,
+      'Amostra:',
+      md.slice(0, 160),
+    )
 
     const lines = md
       .split(/\r?\n/)
@@ -136,12 +143,17 @@ export async function extractTextFromPDF(file: File | ArrayBuffer): Promise<Extr
   try {
     const backendResult = await extractViaBackend(file)
     if (backendResult && backendResult.fullText && backendResult.fullText.trim().length > 0) {
+      console.log(
+        '[PDF-Nu] [pdfExtractor] Usando extração do backend com sucesso. Total de linhas:',
+        backendResult.pages[0]?.lines.length,
+      )
       return backendResult
     }
   } catch (bErr) {
-    console.warn('[pdfExtractor] Erro na tentativa de extração backend:', bErr)
+    console.warn('[PDF-Nu] [pdfExtractor] Erro na tentativa de extração backend:', bErr)
   }
 
+  console.log('[PDF-Nu] [pdfExtractor] Iniciando extração fallback client-side via PDF.js...')
   // 2. Fallback client-side com pdfjs
   let arrayBuffer: ArrayBuffer
   if (file instanceof File) {

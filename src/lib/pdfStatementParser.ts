@@ -809,7 +809,7 @@ export function parseNuAccountStatement(
   // Linhas que iniciam um novo lançamento
   const isTransactionStart = (l: string) => {
     const clean = l.replace(/^[|*\s]+/, '')
-    return /^(transfer[eê]ncia\s+enviada\s+pelo\s+pix|transfer[eê]ncia\s+recebida\s+pelo\s+pix|compra\s+no\s+d[eé]bito|pagamento\s+de\s+fatura|pagamento\s+de\s+boleto|d[eé]bito\s+em\s+conta|estorno|reembolso|dep[oó]sito)/i.test(
+    return /^(transfer[eê]ncia\s+enviada\s+pelo\s+pix|transfer[eê]ncia\s+recebida\s+pelo\s+pix|compra\s+no\s+d[eé]bito|pagamento\s+de\s+fatura|pagamento\s+de\s+boleto(?: efetuado)?|d[eé]bito\s+em\s+conta|estorno|reembolso|dep[oó]sito)/i.test(
       clean,
     )
   }
@@ -849,7 +849,67 @@ export function parseNuAccountStatement(
       }
     }
 
-    // 2. Linha corrida de texto: "Desc 50,00"
+    // 2. Linha com pipes parciais ou em tabelas sem último pipe (ex: "|Transferência enviada pelo Pix|60,00")
+    if (l.includes('|')) {
+      const parts = l
+        .split('|')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+      if (parts.length >= 2) {
+        const lastPart = parts[parts.length - 1]
+        const amtMatch = lastPart.match(/^[-+–—]?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/)
+        if (amtMatch) {
+          const rawNum = amtMatch[1].replace(/\./g, '').replace(',', '.')
+          const parsed = parseFloat(rawNum)
+          if (!isNaN(parsed) && parsed > 0) {
+            const desc = parts.slice(0, parts.length - 1).join(' - ')
+            return {
+              description: desc,
+              amount: parsed,
+              isNegative: lastPart.includes('-'),
+              rawAmount: lastPart,
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Linha corrida que termina com metadados bancários após o valor
+    // Exemplos reais no markdown do backend:
+    // "Transferência enviada pelo Pix Camila Sousa da Silva - •••.625.463-•• - NU 50,00 PAGAMENTOS-IP (0260) Agência: 1 Conta: 67278091-1"
+    // "Transferência enviada pelo Pix KYTA PROJETOS IMOBILIARIOS - 62.021.062/0001-450,00 37 - ASAAS IP S.A. (0461) Agência: 1 Conta: 6545265-8"
+    // "Transferência enviada pelo Pix 48.287.633 ANA CLARA TORRES - 48.287.633 35,00 /0001-59 - NU PAGAMENTOS-IP (0260) Agência: 1 Conta: 121066474-3"
+    const embeddedMatch = l.match(
+      /^(.*?)(?:(?:\s+)|(?:-\s*))([-+]?\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s+(.*)$/i,
+    )
+    if (embeddedMatch) {
+      const prefix = embeddedMatch[1].replace(/^[|*\s]+|[|*\s]+$/g, '').trim()
+      const rawVal = embeddedMatch[2].trim()
+      const suffix = embeddedMatch[3].trim()
+
+      // O sufixo deve parecer metadados bancários (agência, conta, instituição, CNPJ, dígitos)
+      if (
+        /ag[eê]ncia|conta|pagamentos|asaas|nu|bco|ip|s\.a\.|•••|\d{2}\.\d{3}\.\d{3}|^\d+\s*-\s*[A-Z]|\/\d{4}-\d{2}/i.test(
+          suffix,
+        )
+      ) {
+        const isNeg = rawVal.startsWith('-')
+        const cleanNum = rawVal
+          .replace(/^[-+–—]\s*/, '')
+          .replace(/\./g, '')
+          .replace(',', '.')
+        const parsed = parseFloat(cleanNum)
+        if (!isNaN(parsed) && parsed > 0 && prefix.length > 0) {
+          return {
+            description: prefix,
+            amount: parsed,
+            isNegative: isNeg,
+            rawAmount: rawVal,
+          }
+        }
+      }
+    }
+    // 4. Linha corrida de texto: "Desc 50,00"
     const m = l.match(/^(.*?)\s+([-+]?\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})$/)
     if (!m) return null
     const desc = m[1].replace(/^[|*\s]+|[|*\s]+$/g, '').trim()
@@ -910,8 +970,62 @@ export function parseNuAccountStatement(
     activeTx = null
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i].trim()
+  // Pré-processamento: se o backend aglutinou múltiplos lançamentos ou cabeçalho + lançamentos
+  // em uma única linha (ex: "**Movimentações** 01 SET 2026 **Total de saídas- 1.763,28** Pagamento de fatura 1.257,28 Compra no débito ..."),
+  // quebramos antes dos delimitadores de lançamento ou de dia.
+  const expandedLines: string[] = []
+  for (const rawL of lines) {
+    const trimmed = rawL.trim()
+    if (!trimmed) continue
+
+    // Se a linha contém mais de um início de transação ou combina dia + transação em uma linha
+    const txMarkers = [
+      'Pagamento de fatura',
+      'Compra no débito',
+      'Transferência enviada pelo Pix',
+      'Transferência recebida pelo Pix',
+      'Pagamento de boleto',
+      'Débito em conta',
+    ]
+
+    // Verifica se contém múltiplos marcadores ou um dia seguido de marcador
+    const markerPositions: Array<{ pos: number; text: string }> = []
+    for (const marker of txMarkers) {
+      let searchIdx = 0
+      while (searchIdx < trimmed.length) {
+        const found = trimmed.toLowerCase().indexOf(marker.toLowerCase(), searchIdx)
+        if (found === -1) break
+        markerPositions.push({ pos: found, text: marker })
+        searchIdx = found + marker.length
+      }
+    }
+
+    if (
+      markerPositions.length > 1 ||
+      (markerPositions.length === 1 &&
+        markerPositions[0].pos > 0 &&
+        /^\*{0,2}\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i.test(trimmed.replace(/^[*#_\s]+/, '')))
+    ) {
+      markerPositions.sort((a, b) => a.pos - b.pos)
+      let prevPos = 0
+      for (const m of markerPositions) {
+        if (m.pos > prevPos) {
+          const chunk = trimmed.slice(prevPos, m.pos).trim()
+          if (chunk) expandedLines.push(chunk)
+        }
+        prevPos = m.pos
+      }
+      if (prevPos < trimmed.length) {
+        const chunk = trimmed.slice(prevPos).trim()
+        if (chunk) expandedLines.push(chunk)
+      }
+    } else {
+      expandedLines.push(trimmed)
+    }
+  }
+
+  for (let i = 0; i < expandedLines.length; i++) {
+    const rawLine = expandedLines[i].trim()
     if (!rawLine) continue
 
     // 1. Cabeçalho de dia (ex: "01 SET 2026 Total de saídas - 1.763,28")

@@ -136,4 +136,63 @@ describe('extractNuStatement - Parser do Extrato Nu real', () => {
     expect(Number(sumDebits.toFixed(2))).toBe(9030.98)
     expect(Number(sumCredits.toFixed(2))).toBe(7523.11)
   })
+
+  it('parsa a saída Markdown REAL do backend Skip Cloud ($documents.toMarkdown) e bate os totais exatos', () => {
+    const mdPath = path.resolve('src/lib/nu_backend_markdown_dump.md')
+    expect(fs.existsSync(mdPath)).toBe(true)
+    const mdContent = fs.readFileSync(mdPath, 'utf-8')
+    expect(mdContent.length).toBeGreaterThan(0)
+
+    const lines = mdContent
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+
+    const result = parsePDFStatement(lines, mdContent)
+
+    expect(result.isNuAccountStatement).toBe(true)
+    expect(result.detectedCurrency).toBe('BRL')
+    expect(result.detectedCompetenceMonth).toBe('2026-09')
+
+    const debits = result.transactions.filter((tx) => tx.type === 'debit')
+    const credits = result.transactions.filter((tx) => tx.type === 'credit')
+
+    const sumDebits = debits.reduce((acc, tx) => acc + tx.amount, 0)
+    const sumCredits = credits.reduce((acc, tx) => acc + tx.amount, 0)
+
+    // TOTAIS REAIS DO EXTRATO NUBANK SET/2026
+    expect(Number(sumDebits.toFixed(2))).toBe(9030.98)
+    expect(Number(sumCredits.toFixed(2))).toBe(7523.11)
+
+    // Validar transações-chave que antes ficavam não reconhecidas no markdown do backend:
+    // 1. Pagamento de fatura 1.257,28
+    const fatura = result.transactions.find((tx) => tx.description.includes('Pagamento de fatura'))
+    expect(fatura).toBeDefined()
+    expect(fatura?.amount).toBe(1257.28)
+
+    // 2. Compra no débito JIM.COM* 62948758 MAYR 6,00
+    const debito = result.transactions.find((tx) => tx.description.includes('JIM.COM'))
+    expect(debito).toBeDefined()
+    expect(debito?.amount).toBe(6.0)
+
+    // 3. Pix com sufixo Nu Pagamentos: Camila Sousa 50,00
+    const pixCamila = result.transactions.find((tx) =>
+      tx.description.includes('Camila Sousa da Silva'),
+    )
+    expect(pixCamila).toBeDefined()
+    expect(pixCamila?.amount).toBe(50.0)
+
+    // 4. Pix KYTA PROJETOS 450,00
+    const pixKyta = result.transactions.find((tx) =>
+      tx.description.includes('KYTA PROJETOS IMOBILIARIOS'),
+    )
+    expect(pixKyta).toBeDefined()
+    expect(pixKyta?.amount).toBe(450.0)
+
+    // 5. Pagamento de boleto efetuado PJBANK 623,63
+    const boleto = result.transactions.find(
+      (tx) => tx.description.includes('PJBANK') && tx.amount === 623.63,
+    )
+    expect(boleto).toBeDefined()
+  })
 })

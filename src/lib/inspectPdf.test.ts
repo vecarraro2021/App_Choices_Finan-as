@@ -129,8 +129,18 @@ describe('inspect real pdf', () => {
     const sumDebits = debits.reduce((acc, tx) => acc + tx.amount, 0)
     const sumCredits = credits.reduce((acc, tx) => acc + tx.amount, 0)
 
-    throw new Error(
-      `BACKEND_EVAL: unrec=${JSON.stringify(parseResult.unrecognizedLines)}`,
+    console.log('[DEBUG_BACKEND_EVAL] Transactions parsed count:', parseResult.transactions.length)
+    console.log('[DEBUG_BACKEND_EVAL] Debits count:', debits.length, 'Sum:', sumDebits.toFixed(2))
+    console.log(
+      '[DEBUG_BACKEND_EVAL] Credits count:',
+      credits.length,
+      'Sum:',
+      sumCredits.toFixed(2),
     )
+    console.log('[DEBUG_BACKEND_EVAL] Unrecognized count:', parseResult.unrecognizedLines.length)
+    console.log('[DEBUG_BACKEND_EVAL] Unrecognized lines:', parseResult.unrecognizedLines)
+    expect(parseResult.isNuAccountStatement).toBe(true)
+    expect(Number(sumDebits.toFixed(2))).toBe(9030.98)
+    expect(Number(sumCredits.toFixed(2))).toBe(7523.11)
   })
 })
