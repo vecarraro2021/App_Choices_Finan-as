@@ -31,7 +31,9 @@ describe('extractNuStatement - Parser do Extrato Nu real', () => {
 
     // Lançamentos específicos reconhecidos
     // 1. Pagamento de fatura: 1.257,28
-    const faturaTx = result.transactions.find((tx) => tx.description.includes('Pagamento de fatura'))
+    const faturaTx = result.transactions.find((tx) =>
+      tx.description.includes('Pagamento de fatura'),
+    )
     expect(faturaTx).toBeDefined()
     expect(faturaTx?.amount).toBe(1257.28)
     expect(faturaTx?.type).toBe('debit')
@@ -43,13 +45,17 @@ describe('extractNuStatement - Parser do Extrato Nu real', () => {
     expect(debitoTx?.type).toBe('debit')
 
     // 3. Pix enviado com valor: Camila Sousa 50,00
-    const pixCamila = result.transactions.find((tx) => tx.description.includes('Camila Sousa da Silva'))
+    const pixCamila = result.transactions.find((tx) =>
+      tx.description.includes('Camila Sousa da Silva'),
+    )
     expect(pixCamila).toBeDefined()
     expect(pixCamila?.amount).toBe(50.0)
     expect(pixCamila?.type).toBe('debit')
 
     // 4. Pix recebido: VERONICA DE SOUZA CARRARO LTDA 2.600,00
-    const pixRecebido = result.transactions.find((tx) => tx.description.includes('VERONICA DE SOUZA CARRARO LTDA'))
+    const pixRecebido = result.transactions.find((tx) =>
+      tx.description.includes('VERONICA DE SOUZA CARRARO LTDA'),
+    )
     expect(pixRecebido).toBeDefined()
     expect(pixRecebido?.amount).toBe(2600.0)
     expect(pixRecebido?.type).toBe('credit')
