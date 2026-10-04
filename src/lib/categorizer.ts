@@ -234,21 +234,101 @@ const KEYWORD_MAP: Record<string, string[]> = {
 }
 
 /**
- * Suggests a category ID given a transaction description.
+ * Nome padrão do sistema para a categoria de valores recebidos/entradas
+ */
+export const PUNCTUAL_INCOME_CATEGORY_NAME = 'Entradas Pontuais & Variáveis no Período'
+
+/**
+ * Localiza a categoria de "Entradas Pontuais & Variáveis no Período" na árvore de categorias.
+ * Busca por match exato em minúsculas ou contendo "entradas pontuais".
+ */
+export function findPunctualIncomeCategory(categories: Category[]): Category | undefined {
+  if (!categories || categories.length === 0) return undefined
+  const exact = categories.find(
+    (c) => c.name.trim().toLowerCase() === PUNCTUAL_INCOME_CATEGORY_NAME.toLowerCase(),
+  )
+  if (exact) return exact
+
+  return categories.find((c) => {
+    const low = c.name.toLowerCase()
+    return low.includes('entradas pontuais') || low.includes('entrada pontual')
+  })
+}
+
+/**
+ * Contexto adicional para avaliação de categorização
+ */
+export interface CategoryMatchContext {
+  type?: 'credit' | 'debit'
+  amount?: number
+  isIncome?: boolean
+  section?: 'entradas' | 'saidas' | string
+}
+
+/**
+ * Verifica se uma transação representa um valor recebido / entrada financeira.
+ */
+export function isIncomeTransaction(description: string, context?: CategoryMatchContext): boolean {
+  if (context?.type === 'credit') return true
+  if (context?.isIncome === true) return true
+  if (context?.section && context.section.toLowerCase().includes('entrada')) return true
+
+  const descLower = (description || '').toLowerCase()
+  const incomeKeywords = [
+    'transferência recebida',
+    'transferencia recebida',
+    'recebida pelo pix',
+    'recebido pelo pix',
+    'pix recebido',
+    'valor recebido',
+    'reembolso',
+    'estorno',
+    'depósito recebido',
+    'deposito recebido',
+    'rendimento líquido',
+    'rendimento liquido',
+    'pagamento recebido',
+    'salário recebido',
+    'salario recebido',
+    'proventos recebidos',
+  ]
+
+  return incomeKeywords.some((kw) => descLower.includes(kw))
+}
+
+/**
+ * Suggests a category ID given a transaction description and optional context.
  */
 export interface CategoryMatchResult {
   categoryId?: string
+  categoryName?: string
   confidence: 'alta' | 'media' | 'nenhuma'
-  matchedBy?: 'direct' | 'keyword'
+  matchedBy?: 'direct' | 'keyword' | 'income_rule'
 }
 
 /**
  * Detailed suggestion evaluation to differentiate confident matches from uncertain ones.
+ * REGRA PRIORITÁRIA DO SISTEMA: Lançamentos de entrada/crédito são categorizados
+ * como "Entradas Pontuais & Variáveis no Período" ANTES da categorização normal de despesas.
  */
 export function evaluateCategoryMatch(
   description: string,
   categories: Category[],
+  context?: CategoryMatchContext,
 ): CategoryMatchResult {
+  if (!description && !context) return { confidence: 'nenhuma' }
+
+  // 0. REGRA PRIORITÁRIA DO SISTEMA: Entradas / Valores recebidos
+  if (isIncomeTransaction(description, context)) {
+    const incomeCategory = findPunctualIncomeCategory(categories)
+    return {
+      categoryId: incomeCategory?.id,
+      categoryName: incomeCategory?.name || PUNCTUAL_INCOME_CATEGORY_NAME,
+      confidence: 'alta',
+      matchedBy: 'income_rule',
+    }
+  }
+
   if (!description) return { confidence: 'nenhuma' }
   const descLower = description.toLowerCase()
 
@@ -257,7 +337,7 @@ export function evaluateCategoryMatch(
     const nameLower = cat.name.toLowerCase()
     // Skip very short or generic names to avoid false positives
     if (nameLower.length > 3 && descLower.includes(nameLower)) {
-      return { categoryId: cat.id, confidence: 'alta', matchedBy: 'direct' }
+      return { categoryId: cat.id, categoryName: cat.name, confidence: 'alta', matchedBy: 'direct' }
     }
   }
 
@@ -271,7 +351,12 @@ export function evaluateCategoryMatch(
           catNameKey.toLowerCase().includes(c.name.toLowerCase()),
       )
       if (found) {
-        return { categoryId: found.id, confidence: 'media', matchedBy: 'keyword' }
+        return {
+          categoryId: found.id,
+          categoryName: found.name,
+          confidence: 'media',
+          matchedBy: 'keyword',
+        }
       }
     }
   }
@@ -282,15 +367,23 @@ export function evaluateCategoryMatch(
 /**
  * Suggests a category ID given a transaction description.
  */
-export function suggestCategory(description: string, categories: Category[]): string | undefined {
-  const match = evaluateCategoryMatch(description, categories)
+export function suggestCategory(
+  description: string,
+  categories: Category[],
+  context?: CategoryMatchContext,
+): string | undefined {
+  const match = evaluateCategoryMatch(description, categories, context)
   if (match.categoryId) {
     return match.categoryId
   }
 
-  // 3. Fallback to "Não Categorizado" or "Extras" if available
-  const uncategorized = categories.find(
-    (c) => c.name.toLowerCase() === 'não categorizado' || c.name.toLowerCase() === 'extras',
-  )
-  return uncategorized?.id
+  // 3. Fallback to "Não Categorizado" or "Extras" if available (apenas se não for entrada)
+  if (!isIncomeTransaction(description, context)) {
+    const uncategorized = categories.find(
+      (c) => c.name.toLowerCase() === 'não categorizado' || c.name.toLowerCase() === 'extras',
+    )
+    return uncategorized?.id
+  }
+
+  return undefined
 }

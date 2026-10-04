@@ -408,7 +408,10 @@ export default function TransactionsView() {
       setDateMode(useCompetenceByInitial ? 'competence' : 'original')
 
       const rawItems = parseResult.transactions.map((tx, idx) => {
-        const matchResult = evaluateCategoryMatch(tx.description, categories)
+        const matchResult = evaluateCategoryMatch(tx.description, categories, {
+          type: tx.type,
+          amount: tx.amount,
+        })
         return {
           id: `pdf-raw-${idx}`,
           date: tx.date,
@@ -786,6 +789,14 @@ export default function TransactionsView() {
       const rawAmt = parseAmount(r[amtCol])
       const m = normDate.slice(0, 7)
 
+      // Verifica se a linha indica crédito ou valor positivo em coluna de sinal/tipo
+      const rawAmtStr = String(r[amtCol] || '')
+      const isPositiveCredit =
+        rawAmtStr.includes('+') ||
+        rawAmtStr.toUpperCase().includes(' C') ||
+        rawAmtStr.toUpperCase().endsWith('C') ||
+        rawAmtStr.toUpperCase().includes('CR')
+
       // Attempt matching category from file column or auto-categorizer
       let assignedCat: string | undefined
       if (cCol && cCol !== 'none' && r[cCol]) {
@@ -796,7 +807,10 @@ export default function TransactionsView() {
       }
 
       if (!assignedCat) {
-        const matchResult = evaluateCategoryMatch(desc, categories)
+        const matchResult = evaluateCategoryMatch(desc, categories, {
+          amount: rawAmt,
+          isIncome: isPositiveCredit,
+        })
         if (matchResult.categoryId) {
           assignedCat = matchResult.categoryId
         }

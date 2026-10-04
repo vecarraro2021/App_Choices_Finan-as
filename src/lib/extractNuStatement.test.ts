@@ -195,4 +195,60 @@ describe('extractNuStatement - Parser do Extrato Nu real', () => {
     )
     expect(boleto).toBeDefined()
   })
+
+  it('categoriza TODOS os lançamentos de entrada do extrato Nu como "Entradas Pontuais & Variáveis no Período"', async () => {
+    const { evaluateCategoryMatch, PUNCTUAL_INCOME_CATEGORY_NAME } = await import('./categorizer')
+    const lines = [...NU_STATEMENT_LINES]
+    const fullText = NU_STATEMENT_FULL_TEXT
+    const parseResult = parsePDFStatement(lines, fullText)
+
+    // Simulando árvore de categorias do usuário contendo despesas e a categoria de entradas
+    const mockCategories: any[] = [
+      { id: 'cat-income', name: 'Entradas Pontuais & Variáveis no Período', type: 'main' },
+      { id: 'cat-lazer', name: 'Restaurantes', type: 'sub' },
+      { id: 'cat-mercado', name: 'Mercado', type: 'sub' },
+      { id: 'cat-transporte', name: 'Uber / Táxi', type: 'sub' },
+      { id: 'cat-moradia', name: 'Aluguel', type: 'sub' },
+      { id: 'cat-extras', name: 'Extras', type: 'main' },
+    ]
+
+    const credits = parseResult.transactions.filter((tx) => tx.type === 'credit')
+    const debits = parseResult.transactions.filter((tx) => tx.type === 'debit')
+
+    expect(credits.length).toBeGreaterThan(0)
+    expect(debits.length).toBeGreaterThan(0)
+
+    // 1. TODAS as transações de crédito/entrada DEVEM receber a categoria de Entradas Pontuais
+    for (const creditTx of credits) {
+      const match = evaluateCategoryMatch(creditTx.description, mockCategories, {
+        type: creditTx.type,
+        amount: creditTx.amount,
+      })
+      expect(match.categoryId).toBe('cat-income')
+      expect(match.categoryName).toBe(PUNCTUAL_INCOME_CATEGORY_NAME)
+      expect(match.matchedBy).toBe('income_rule')
+    }
+
+    // 2. Se a categoria não estiver na árvore com o id, deve sugerir o nome padrão do sistema
+    const emptyCategories: any[] = []
+    for (const creditTx of credits) {
+      const match = evaluateCategoryMatch(creditTx.description, emptyCategories, {
+        type: creditTx.type,
+        amount: creditTx.amount,
+      })
+      expect(match.categoryId).toBeUndefined()
+      expect(match.categoryName).toBe(PUNCTUAL_INCOME_CATEGORY_NAME)
+      expect(match.matchedBy).toBe('income_rule')
+    }
+
+    // 3. Despesas (debit) seguem o fluxo normal de despesas (NÃO são marcadas como entradas pontuais)
+    for (const debitTx of debits) {
+      const match = evaluateCategoryMatch(debitTx.description, mockCategories, {
+        type: debitTx.type,
+        amount: debitTx.amount,
+      })
+      expect(match.matchedBy).not.toBe('income_rule')
+      expect(match.categoryId).not.toBe('cat-income')
+    }
+  })
 })
