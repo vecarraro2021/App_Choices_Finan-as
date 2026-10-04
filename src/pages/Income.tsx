@@ -83,6 +83,7 @@ export default function IncomeView() {
   const [description, setDescription] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
+  const [isBrlManuallyEdited, setIsBrlManuallyEdited] = useState(false)
 
   // Edit Punctual Income modal state
   const [editingIncome, setEditingIncome] = useState<Income | null>(null)
@@ -417,6 +418,55 @@ export default function IncomeView() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Helper para formatar BRL em pt-BR (ex: "15.000,00" ou "550,50")
+  const formatBrlValue = (val: number): string => {
+    return val.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
+
+  // Recalcular BRL a partir de EUR quando o mês ou a taxa mudam (se o BRL não foi editado manualmente)
+  useEffect(() => {
+    if (!showAddModal) return
+    const parsedEur = parseAmount(amountEur)
+    if (parsedEur > 0 && !isBrlManuallyEdited) {
+      // Checar se a taxa para o mês já está no cache local
+      const hasRate = exchangeRates.some((r) => r.month === month.slice(0, 7) && Number(r.rate) > 0)
+      if (!hasRate && !loading) {
+        // Buscar taxas atualizadas caso o mês ainda não esteja presente
+        getExchangeRates()
+          .then((rates) => {
+            if (rates && rates.length > 0) {
+              setExchangeRates(rates)
+              const rate = getRateForMonth(month, rates)
+              if (rate > 0) {
+                setAmountBrl(formatBrlValue(parsedEur * rate))
+              }
+            }
+          })
+          .catch(() => {
+            // Falha silenciosa, usa taxa disponível sem erro intrusivo
+            const rate = getRateForMonth(month, exchangeRates)
+            if (rate > 0) {
+              setAmountBrl(formatBrlValue(parsedEur * rate))
+            }
+          })
+      } else {
+        const rate = getRateForMonth(month, exchangeRates)
+        if (rate > 0) {
+          setAmountBrl(formatBrlValue(parsedEur * rate))
+        }
+      }
+    }
+  }, [month, exchangeRates, showAddModal, amountEur, isBrlManuallyEdited, loading])
+
+  // Open Add Modal for Punctual Income (reset flags)
+  const handleOpenAddModal = () => {
+    setIsBrlManuallyEdited(false)
+    setShowAddModal(true)
   }
 
   // Open Edit Modal for Punctual Income
@@ -826,7 +876,7 @@ export default function IncomeView() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAddModal}
             className="text-xs border-slate-300"
           >
             <Plus className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
@@ -1053,7 +1103,15 @@ export default function IncomeView() {
       </Dialog>
 
       {/* MODAL: ADD PUNCTUAL INCOME */}
-      <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+      <Dialog
+        open={showAddModal}
+        onOpenChange={(open) => {
+          setShowAddModal(open)
+          if (!open) {
+            setIsBrlManuallyEdited(false)
+          }
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Registrar Entrada Pontual</DialogTitle>
@@ -1094,9 +1152,10 @@ export default function IncomeView() {
                   value={amountBrl}
                   onChange={(e) => {
                     setAmountBrl(e.target.value)
+                    setIsBrlManuallyEdited(true)
                     const parsed = parseAmount(e.target.value)
                     const mRate = getRateForMonth(month, exchangeRates)
-                    if (parsed > 0) {
+                    if (parsed > 0 && mRate > 0) {
                       setAmountEur((parsed / mRate).toFixed(2))
                     }
                   }}
@@ -1110,7 +1169,20 @@ export default function IncomeView() {
                   id="i-eur"
                   placeholder="Ex: 2.500,00"
                   value={amountEur}
-                  onChange={(e) => setAmountEur(e.target.value)}
+                  onChange={(e) => {
+                    const newEur = e.target.value
+                    setAmountEur(newEur)
+                    // Ao digitar no campo EUR, reseta a flag de edição manual do BRL
+                    setIsBrlManuallyEdited(false)
+                    const parsedEur = parseAmount(newEur)
+                    if (parsedEur > 0) {
+                      const mRate = getRateForMonth(month, exchangeRates)
+                      if (mRate > 0) {
+                        setAmountBrl(formatBrlValue(parsedEur * mRate))
+                      }
+                    }
+                    // Se o usuário apagar o EUR (parsedEur <= 0), NÃO apaga o BRL automaticamente
+                  }}
                 />
               </div>
             </div>
