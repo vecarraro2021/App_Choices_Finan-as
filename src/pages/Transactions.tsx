@@ -2068,9 +2068,6 @@ export default function TransactionsView() {
                                     : ''
                                 }`}
                               >
-                                <span className="font-bold text-slate-900 shrink-0 tabular-nums">
-                                  • {formattedAmtVal}
-                                </span>
                                 <span className="truncate text-slate-700 font-medium">
                                   {row.description}
                                 </span>

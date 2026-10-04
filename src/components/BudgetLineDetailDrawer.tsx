@@ -16,19 +16,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Category, Transaction, Currency, ExchangeRate } from '@/types/finance'
 import { formatCurrency, formatMonthShort } from '@/lib/formatters'
 import { getRateForMonth } from '@/services/financeService'
-import {
-  ReceiptText,
-  Calendar,
-  Layers,
-  ArrowUpDown,
-  Search,
-  CheckCircle2,
-  FilterX,
-  CreditCard,
-} from 'lucide-react'
+import { ReceiptText, Calendar, Layers, ArrowUpDown, Search, FilterX } from 'lucide-react'
+
+/**
+ * Sanitiza descrições que contenham prefixos de marcadores/bullets ou números de pré-visualização,
+ * como "• 6 Compra no débito..." ou "- 10 Pagamento...", garantindo exibição limpa.
+ */
+export function sanitizeDescription(desc?: string | null): string {
+  if (!desc) return 'Sem descrição'
+  let cleaned = desc.trim()
+  // 1. Remove marcadores seguidos de número e separador: "• 6 Compra...", "- 12 - Pago..."
+  cleaned = cleaned.replace(/^[•\-*\s]*\d+[.\s\-–—]+\s*/, '')
+  // 2. Remove marcadores simples restantes: "• ", "- ", "* "
+  cleaned = cleaned.replace(/^[•\-*\s]+/, '')
+  cleaned = cleaned.trim()
+  return cleaned || 'Sem descrição'
+}
 
 export interface BudgetLineDetailDrawerProps {
   isOpen: boolean
@@ -96,10 +103,12 @@ export function BudgetLineDetailDrawer({
         }
       }
 
-      // 3. Busca textual opcional
+      // 3. Busca textual opcional (compara também descrição sanitizada)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
-        const descMatch = (tx.description || '').toLowerCase().includes(q)
+        const rawDesc = (tx.description || '').toLowerCase()
+        const cleanDesc = sanitizeDescription(tx.description).toLowerCase()
+        const descMatch = rawDesc.includes(q) || cleanDesc.includes(q)
         const amtMatch = String(tx.amount || '').includes(q)
         const dateMatch = (tx.date || '').includes(q)
         if (!descMatch && !amtMatch && !dateMatch) return false
@@ -309,73 +318,101 @@ export function BudgetLineDetailDrawer({
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              {sortedTransactions.map((tx) => {
-                const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-                const monthRate = getRateForMonth(txMonth, exchangeRates)
-                const amtBrl = Number(tx.amount) || 0
-                const formattedDate = tx.date
-                  ? tx.date.slice(0, 10).split('-').reverse().join('/')
-                  : formatMonthShort(txMonth)
+            <TooltipProvider delayDuration={200}>
+              <div className="space-y-1.5">
+                {/* Cabeçalho da tabela de 3 colunas: Data (w-20) | Descrição (flex-1) | Valor (w-28 text-right) */}
+                <div className="flex items-center gap-3 px-3 py-1.5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                  <div className="w-20 shrink-0">Data</div>
+                  <div className="flex-1 min-w-0">Descrição</div>
+                  <div className="w-28 shrink-0 text-right">Valor</div>
+                </div>
 
-                // Subcategoria de origem (quando for categoria mãe)
-                const txCatId = tx.category || (tx.expand?.category ? tx.expand.category.id : '')
-                const isSubItem = isMainCategory && txCatId && txCatId !== category.id
-                const subName = isSubItem ? categoryNamesMap.get(txCatId) : null
+                {sortedTransactions.map((tx) => {
+                  const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
+                  const monthRate = getRateForMonth(txMonth, exchangeRates)
+                  const amtBrl = Number(tx.amount) || 0
+                  const formattedDate = tx.date
+                    ? tx.date.slice(0, 10).split('-').reverse().join('/')
+                    : formatMonthShort(txMonth)
+                  const cleanDesc = sanitizeDescription(tx.description)
 
-                return (
-                  <div
-                    key={tx.id}
-                    className="p-3 bg-white rounded-lg border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors flex items-center justify-between gap-3 group"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-semibold text-slate-500 tabular-nums flex items-center gap-1">
-                          <Calendar className="h-3 w-3 text-slate-400" />
-                          {formattedDate}
-                        </span>
+                  // Subcategoria de origem (quando for categoria mãe)
+                  const txCatId = tx.category || (tx.expand?.category ? tx.expand.category.id : '')
+                  const isSubItem = isMainCategory && txCatId && txCatId !== category.id
+                  const subName = isSubItem ? categoryNamesMap.get(txCatId) : null
 
-                        {tx.source && (
-                          <Badge
-                            variant="secondary"
-                            className={`text-[10px] py-0 px-1.5 font-normal ${
-                              tx.source === 'importado'
-                                ? 'bg-sky-50 text-sky-700 border border-sky-200/60'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {tx.source === 'importado' ? 'Extrato' : 'Manual'}
-                          </Badge>
-                        )}
+                  return (
+                    <div
+                      key={tx.id}
+                      className="p-3 bg-white rounded-lg border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors flex items-center gap-3 group"
+                    >
+                      {/* Coluna 1: Data (w-20 shrink-0) */}
+                      <div className="w-20 shrink-0 text-[11px] font-semibold text-slate-500 tabular-nums">
+                        {formattedDate}
+                      </div>
 
-                        {subName && (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] py-0 px-1.5 font-medium border-slate-200 bg-slate-50 text-slate-600 truncate max-w-[180px]"
-                            title={`Lançamento vinculado à subcategoria ${subName}`}
-                          >
-                            ↳ {subName}
-                          </Badge>
+                      {/* Coluna 2: Descrição com truncate + Tooltip (flex-1 min-w-0) */}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="min-w-0">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <p
+                                tabIndex={0}
+                                className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-700 transition-colors cursor-default outline-none"
+                                title={cleanDesc}
+                              >
+                                {cleanDesc}
+                              </p>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              className="max-w-xs text-xs font-normal break-words bg-slate-900 text-white border-slate-800 shadow-md"
+                            >
+                              {cleanDesc}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+
+                        {/* Badges de metadados: fonte e subcategoria */}
+                        {(tx.source || subName) && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {tx.source && (
+                              <Badge
+                                variant="secondary"
+                                className={`text-[10px] py-0 px-1.5 font-normal ${
+                                  tx.source === 'importado'
+                                    ? 'bg-sky-50 text-sky-700 border border-sky-200/60'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {tx.source === 'importado' ? 'Extrato' : 'Manual'}
+                              </Badge>
+                            )}
+
+                            {subName && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 font-medium border-slate-200 bg-slate-50 text-slate-600 truncate max-w-[180px]"
+                                title={`Lançamento vinculado à subcategoria ${subName}`}
+                              >
+                                ↳ {subName}
+                              </Badge>
+                            )}
+                          </div>
                         )}
                       </div>
 
-                      <p
-                        className="text-xs font-semibold text-slate-900 truncate overflow-hidden group-hover:text-blue-700 transition-colors"
-                        title={tx.description || 'Sem descrição'}
-                      >
-                        {tx.description || 'Sem descrição'}
-                      </p>
-                    </div>
-
-                    <div className="text-right shrink-0 pl-3">
-                      <div className="font-bold text-sm text-slate-900 tabular-nums">
-                        {formatCurrency(amtBrl, currency, monthRate)}
+                      {/* Coluna 3: Valor (w-28 shrink-0 text-right, em negrito font-bold text-sm text-slate-900 tabular-nums) */}
+                      <div className="w-28 shrink-0 text-right">
+                        <div className="font-bold text-sm text-slate-900 tabular-nums">
+                          {formatCurrency(amtBrl, currency, monthRate)}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            </TooltipProvider>
           )}
         </div>
 
