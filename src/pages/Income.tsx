@@ -5,17 +5,20 @@ import {
   getIncomes,
   getRecurringIncomes,
   getAllTransactions,
+  getCategories,
   createIncome,
   updateIncome,
   deleteIncome,
+  deleteTransaction,
   createRecurringIncome,
   updateRecurringIncome,
   deleteRecurringIncome,
   getExchangeRates,
   getRateForMonth,
 } from '@/services/financeService'
-import { Income, RecurringIncome, Transaction, ExchangeRate } from '@/types/finance'
+import { Income, RecurringIncome, Transaction, ExchangeRate, Category } from '@/types/finance'
 import { calculateMonthlyDeficits } from '@/lib/alertsEngine'
+import { findPunctualIncomeCategory, PUNCTUAL_INCOME_CATEGORY_NAME } from '@/lib/categorizer'
 import {
   formatCurrency,
   formatPercent,
@@ -61,6 +64,7 @@ export default function IncomeView() {
   const [incomes, setIncomes] = useState<Income[]>([])
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -101,16 +105,18 @@ export default function IncomeView() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [incList, recList, txList, rates] = await Promise.all([
+      const [incList, recList, txList, rates, cats] = await Promise.all([
         getIncomes(),
         getRecurringIncomes(),
         getAllTransactions(),
         getExchangeRates(),
+        getCategories(),
       ])
       setIncomes(incList)
       setRecurringIncomes(recList)
       setTransactions(txList)
       setExchangeRates(rates)
+      setCategories(cats)
     } catch (err) {
       console.error(err)
     } finally {
@@ -125,6 +131,7 @@ export default function IncomeView() {
   useRealtime('income', () => loadData())
   useRealtime('recurring_incomes', () => loadData())
   useRealtime('transactions', () => loadData())
+  useRealtime('categories', () => loadData())
 
   // Distinct months that actually contain data (transactions or incomes)
   const monthsWithData = useMemo(() => {
@@ -165,8 +172,58 @@ export default function IncomeView() {
     }
   }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
 
+  // Identifica a categoria "Entradas Pontuais & Variáveis no Período" ou mãe "Receitas & Entradas"
+  const punctualIncomeCategory = useMemo(() => {
+    return findPunctualIncomeCategory(categories)
+  }, [categories])
+
+  const punctualIncomeCategoryIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (punctualIncomeCategory) {
+      ids.add(punctualIncomeCategory.id)
+      // Se for categoria mãe, inclui também eventuais subcategorias
+      categories
+        .filter((c) => c.parent === punctualIncomeCategory.id)
+        .forEach((sub) => ids.add(sub.id))
+    }
+    // Procura também pela categoria-mãe "Receitas & Entradas" ou similar se existir
+    const parentIncomeCat = categories.find((c) => {
+      const low = c.name.trim().toLowerCase()
+      return low === 'receitas & entradas' || low === 'receitas e entradas' || low === 'receitas'
+    })
+    if (parentIncomeCat) {
+      ids.add(parentIncomeCat.id)
+      categories.filter((c) => c.parent === parentIncomeCat.id).forEach((sub) => ids.add(sub.id))
+    }
+    return ids
+  }, [categories, punctualIncomeCategory])
+
+  // Helper para checar se uma transação é de entrada pontual (por categoria ou expand)
+  const isPunctualIncomeTx = (tx: Transaction): boolean => {
+    if (tx.category && punctualIncomeCategoryIds.has(tx.category)) return true
+    if (tx.expand?.category?.id && punctualIncomeCategoryIds.has(tx.expand.category.id)) return true
+    const catName = tx.expand?.category?.name || ''
+    if (catName) {
+      const low = catName.trim().toLowerCase()
+      if (
+        low === PUNCTUAL_INCOME_CATEGORY_NAME.toLowerCase() ||
+        low.includes('entradas pontuais') ||
+        low.includes('entrada pontual') ||
+        low === 'receitas & entradas' ||
+        low === 'receitas e entradas'
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
   // Filtered transactions & incomes based on startMonth, endMonth, and isFullYear
   const filteredData = useMemo(() => {
+    let s: string
+    let e: string
+    let intervalMonths: string[] = []
+
     if (isFullYear) {
       const refYear =
         monthsWithData.length > 0
@@ -175,70 +232,93 @@ export default function IncomeView() {
             ? startMonth.split('-')[0]
             : '2026'
 
-      const startOfYear = `${refYear}-01`
-      const endOfYear = `${refYear}-12`
-
-      const txs = transactions.filter((tx) => {
-        const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
-        if (!m) return false
-        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
-      })
-
-      const incs = incomes.filter((inc) => {
-        const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
-        if (!m) return false
-        return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
-      })
-
-      const intervalMonths: string[] = []
+      s = `${refYear}-01`
+      e = `${refYear}-12`
       for (let i = 1; i <= 12; i++) {
         intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
       }
-
-      return {
-        txs,
-        incs,
-        intervalMonths,
-        effectiveStart: startOfYear,
-        effectiveEnd: endOfYear,
+    } else {
+      s = startMonth <= endMonth ? startMonth : endMonth
+      e = startMonth <= endMonth ? endMonth : startMonth
+      let curr = s
+      while (curr <= e) {
+        intervalMonths.push(curr)
+        const [y, m] = curr.split('-').map(Number)
+        if (m === 12) {
+          curr = `${y + 1}-01`
+        } else {
+          curr = `${y}-${String(m + 1).padStart(2, '0')}`
+        }
       }
     }
 
-    const s = startMonth <= endMonth ? startMonth : endMonth
-    const e = startMonth <= endMonth ? endMonth : startMonth
-
-    const txs = transactions.filter((tx) => {
+    // Transações no intervalo
+    const txsInPeriod = transactions.filter((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
       if (!m) return false
       return m >= s && m <= e
     })
 
-    const incs = incomes.filter((inc) => {
+    // Separar transações de entradas pontuais das despesas regulares
+    const incomeTransactionsInPeriod = txsInPeriod.filter((tx) => isPunctualIncomeTx(tx))
+    const expenseTransactionsInPeriod = txsInPeriod.filter((tx) => !isPunctualIncomeTx(tx))
+
+    // Incomes da coleção manual `income`
+    const incsInPeriod = incomes.filter((inc) => {
       const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
       if (!m) return false
       return m >= s && m <= e
     })
 
-    const intervalMonths: string[] = []
-    let curr = s
-    while (curr <= e) {
-      intervalMonths.push(curr)
-      const [y, m] = curr.split('-').map(Number)
-      if (m === 12) {
-        curr = `${y + 1}-01`
-      } else {
-        curr = `${y}-${String(m + 1).padStart(2, '0')}`
-      }
-    }
+    // Converter as transações de entrada pontual para itens compatíveis com a tabela e soma
+    const convertedTxIncomes = incomeTransactionsInPeriod.map((tx) => {
+      const txMonth = tx.month || (tx.date ? tx.date.slice(0, 7) : s)
+      const mRate = getRateForMonth(txMonth, exchangeRates)
+      const amtBrl = Number(tx.amount) || 0
+      const amtEur = amtBrl > 0 && mRate > 0 ? amtBrl / mRate : 0
+
+      return {
+        id: tx.id,
+        user: tx.user || '',
+        owner: tx.owner,
+        month: txMonth,
+        amount_brl: amtBrl,
+        amount_eur: amtEur,
+        description: tx.description,
+        date: tx.date,
+        isFromTransaction: true,
+      } as Income & { isFromTransaction?: boolean }
+    })
+
+    // Unir os incomes manuais + transações de receitas pontuais
+    const combinedIncs: (Income & { isFromTransaction?: boolean })[] = [
+      ...incsInPeriod.map((inc) => ({ ...inc, isFromTransaction: false })),
+      ...convertedTxIncomes,
+    ].sort((a, b) => {
+      const dateA = a.date || a.month || ''
+      const dateB = b.date || b.month || ''
+      return dateB.localeCompare(dateA)
+    })
 
     return {
-      txs,
-      incs,
+      txs: expenseTransactionsInPeriod, // Despesas EXCLUEM as transações de receita pontual
+      allTxsInPeriod: txsInPeriod,
+      incomeTxs: incomeTransactionsInPeriod,
+      incs: combinedIncs,
       intervalMonths,
       effectiveStart: s,
       effectiveEnd: e,
     }
-  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
+  }, [
+    isFullYear,
+    transactions,
+    incomes,
+    monthsWithData,
+    startMonth,
+    endMonth,
+    exchangeRates,
+    punctualIncomeCategoryIds,
+  ])
 
   // Metrics calculation considering punctual + recurring strictly for the selected period
   const metrics = useMemo(() => {
@@ -276,7 +356,7 @@ export default function IncomeView() {
 
     const totalIncome = totalPunctualBrl + totalRecurringBrl
 
-    // Total expenses in BRL for the period
+    // Total expenses in BRL for the period (txs JÁ exclui as receitas pontuais)
     const totalExpenses = txs.reduce((acc, tx) => {
       return acc + (Number(tx.amount) || 0)
     }, 0)
@@ -288,6 +368,7 @@ export default function IncomeView() {
     const savingsRate = totalIncome > 0 ? (totalIncome - totalExpenses) / totalIncome : 0
 
     // Monthly deficit check restricted to period transactions and punctual incomes
+    // Passamos incs (que inclui os incomes manuais + transações pontuais) e txs (sem despesas falsas)
     const deficitMonths = calculateMonthlyDeficits(txs, incs, recurringIncomes, exchangeRates)
 
     return {
@@ -378,11 +459,15 @@ export default function IncomeView() {
     }
   }
 
-  // Delete Punctual Income
-  const handleDelete = async (id: string) => {
+  // Delete Punctual Income (suporta tanto item da tabela `income` quanto transação importada)
+  const handleDelete = async (id: string, isFromTransaction = false) => {
     if (!confirm('Deseja realmente remover esta entrada pontual?')) return
     try {
-      await deleteIncome(id)
+      if (isFromTransaction) {
+        await deleteTransaction(id)
+      } else {
+        await deleteIncome(id)
+      }
       toast({ title: 'Receita removida.' })
       loadData()
     } catch (err) {
@@ -786,7 +871,17 @@ export default function IncomeView() {
                         {inc.date ? inc.date.slice(0, 10).split('-').reverse().join('/') : '-'}
                       </td>
                       <td className="py-3 px-4 text-slate-800 font-medium">
-                        {inc.description || 'Renda / Receita Pontual'}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{inc.description || 'Renda / Receita Pontual'}</span>
+                          {inc.isFromTransaction && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] font-normal bg-emerald-50 text-emerald-700 border-emerald-200"
+                            >
+                              Extrato / Lançamento
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-emerald-700 tabular-nums">
                         {formatCurrency(inc.amount_brl, 'BRL')}
@@ -814,19 +909,23 @@ export default function IncomeView() {
                         })()}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-slate-500 hover:text-blue-600"
-                          onClick={() => handleOpenEdit(inc)}
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {!inc.isFromTransaction && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-slate-500 hover:text-blue-600"
+                            onClick={() => handleOpenEdit(inc)}
+                            title="Editar receita"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-slate-500 hover:text-red-600"
-                          onClick={() => handleDelete(inc.id)}
+                          onClick={() => handleDelete(inc.id, inc.isFromTransaction)}
+                          title="Remover receita"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
