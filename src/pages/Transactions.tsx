@@ -98,6 +98,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { sanitizeDescription } from '@/components/BudgetLineDetailDrawer'
 import { useSearchParams } from 'react-router-dom'
 import { InvoiceCompetenceInfoBanner } from '@/components/InvoiceCompetenceInfoBanner'
 
@@ -1979,127 +1981,159 @@ export default function TransactionsView() {
           {importStep === 2 && (
             <div className="flex-1 flex flex-col min-h-0 space-y-2 mt-2">
               <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg max-h-[46vh] bg-white">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-100/90 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs backdrop-blur-xs">
-                    <tr>
-                      <th className="py-2.5 px-3 w-9 text-center">
-                        <input
-                          type="checkbox"
-                          checked={
-                            previewList.length > 0 &&
-                            previewList.every((it) => it.selected !== false)
-                          }
-                          onChange={(e) => {
-                            const checked = e.target.checked
-                            setPreviewList(previewList.map((it) => ({ ...it, selected: checked })))
-                          }}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          title="Selecionar todos"
-                        />
-                      </th>
-                      <th className="py-2.5 px-3 w-36">Data</th>
-                      <th className="py-2.5 px-3">Descrição</th>
-                      <th className="py-2.5 px-3 min-w-[260px] max-w-[320px]">Categoria</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {previewList.length === 0 ? (
+                <TooltipProvider delayDuration={200}>
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100/90 sticky top-0 font-semibold text-slate-700 z-10 shadow-2xs backdrop-blur-xs">
                       <tr>
-                        <td colSpan={4} className="py-8 text-center text-slate-400 text-xs">
-                          Nenhum lançamento identificado para exibição.
-                        </td>
+                        <th className="py-2.5 px-3 w-9 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              previewList.length > 0 &&
+                              previewList.every((it) => it.selected !== false)
+                            }
+                            onChange={(e) => {
+                              const checked = e.target.checked
+                              setPreviewList(
+                                previewList.map((it) => ({ ...it, selected: checked })),
+                              )
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            title="Selecionar todos"
+                          />
+                        </th>
+                        <th className="py-2.5 px-3 w-36">Data</th>
+                        <th className="py-2.5 px-3">Descrição</th>
+                        <th className="py-2.5 px-3 w-28 text-right">Valor</th>
+                        <th className="py-2.5 px-3 min-w-[260px] max-w-[320px]">Categoria</th>
                       </tr>
-                    ) : (
-                      previewList.map((row, idx) => {
-                        const isChecked = row.selected !== false
-                        const formattedAmtVal = Math.round(row.amount || 0)
-                        const dmyFormatted = row.date.split('-').reverse().join('/')
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {previewList.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
+                            Nenhum lançamento identificado para exibição.
+                          </td>
+                        </tr>
+                      ) : (
+                        previewList.map((row, idx) => {
+                          const isChecked = row.selected !== false
+                          const dmyFormatted = row.date.split('-').reverse().join('/')
+                          const cleanDesc = sanitizeDescription(row.description)
 
-                        return (
-                          <tr
-                            key={row.id}
-                            className={`transition-colors ${
-                              isChecked
-                                ? 'bg-blue-50/20 hover:bg-blue-50/40'
-                                : 'opacity-40 bg-slate-50/40 hover:bg-slate-50/60'
-                            }`}
-                          >
-                            <td className="py-2 px-3 text-center align-middle">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
-                                  const updated = [...previewList]
-                                  updated[idx].selected = e.target.checked
-                                  setPreviewList(updated)
-                                }}
-                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                            </td>
+                          // Moeda detectada/utilizada da transação e valor correspondente
+                          const rowCurrency =
+                            row.originalCurrency ||
+                            amountCurrency ||
+                            currencyMeta.detectedCurrency ||
+                            currency ||
+                            'BRL'
+                          const displayAmount =
+                            rowCurrency === 'EUR' && row.originalAmount !== undefined
+                              ? row.originalAmount
+                              : row.amount
 
-                            <td className="py-2 px-3 align-middle">
-                              <div className="relative">
-                                <Input
-                                  type="text"
-                                  defaultValue={dmyFormatted}
-                                  key={`date-input-${row.id}-${row.date}`}
-                                  onBlur={(e) => handleUpdatePreviewDate(idx, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      handleUpdatePreviewDate(
-                                        idx,
-                                        (e.target as HTMLInputElement).value,
-                                      )
-                                      ;(e.target as HTMLInputElement).blur()
-                                    }
-                                  }}
-                                  placeholder="dd/mm/aaaa"
-                                  className="h-7 text-xs font-medium tabular-nums bg-white border-slate-200 focus:border-blue-500 text-slate-900 w-32 px-2"
-                                />
-                              </div>
-                            </td>
+                          const formattedAmtStr = formatCurrency(displayAmount, rowCurrency, 1)
 
-                            <td className="py-2 px-3 align-middle max-w-[280px]">
-                              <div
-                                className="flex items-center gap-1.5 truncate text-slate-800"
-                                title={`${row.description} — ${formatCurrency(row.amount, 'BRL')}${
-                                  amountCurrency === 'EUR' && row.originalAmount !== undefined
-                                    ? ` (orig: € ${row.originalAmount.toFixed(2)})`
-                                    : ''
-                                }`}
-                              >
-                                <span className="truncate text-slate-700 font-medium">
-                                  {row.description}
-                                </span>
-                              </div>
-                            </td>
-
-                            <td className="py-2 px-3 align-middle">
-                              <div className="w-full max-w-[280px]">
-                                <CategorySelectCombobox
-                                  categories={categories}
-                                  value={row.category || 'none'}
-                                  onChange={(val) => {
+                          return (
+                            <tr
+                              key={row.id}
+                              className={`transition-colors ${
+                                isChecked
+                                  ? 'bg-blue-50/20 hover:bg-blue-50/40'
+                                  : 'opacity-40 bg-slate-50/40 hover:bg-slate-50/60'
+                              }`}
+                            >
+                              <td className="py-2 px-3 text-center align-middle">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
                                     const updated = [...previewList]
-                                    const chosen = val === 'none' ? undefined : val
-                                    updated[idx].category = chosen
+                                    updated[idx].selected = e.target.checked
                                     setPreviewList(updated)
                                   }}
-                                  triggerClassName="h-7 text-xs bg-white border-slate-200 shadow-2xs"
-                                  placeholder="Selecione categoria"
-                                  searchPlaceholder="Buscar categoria..."
-                                  emptyText="Nenhuma categoria encontrada."
-                                  specialOption={{ id: 'none', label: 'Não Categorizado' }}
-                                  leadingIcon={getCategoryLeadingIcon(row.category)}
+                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                 />
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
+                              </td>
+
+                              <td className="py-2 px-3 align-middle">
+                                <div className="relative">
+                                  <Input
+                                    type="text"
+                                    defaultValue={dmyFormatted}
+                                    key={`date-input-${row.id}-${row.date}`}
+                                    onBlur={(e) => handleUpdatePreviewDate(idx, e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleUpdatePreviewDate(
+                                          idx,
+                                          (e.target as HTMLInputElement).value,
+                                        )
+                                        ;(e.target as HTMLInputElement).blur()
+                                      }
+                                    }}
+                                    placeholder="dd/mm/aaaa"
+                                    className="h-7 text-xs font-medium tabular-nums bg-white border-slate-200 focus:border-blue-500 text-slate-900 w-32 px-2"
+                                  />
+                                </div>
+                              </td>
+
+                              <td className="py-2 px-3 align-middle min-w-0 max-w-[280px]">
+                                <div className="min-w-0">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <p
+                                        tabIndex={0}
+                                        className="text-xs font-medium text-slate-800 truncate cursor-default outline-none hover:text-blue-700 transition-colors"
+                                        title={cleanDesc}
+                                      >
+                                        {cleanDesc}
+                                      </p>
+                                    </TooltipTrigger>
+                                    <TooltipContent
+                                      side="top"
+                                      className="max-w-xs text-xs font-normal break-words bg-slate-900 text-white border-slate-800 shadow-md"
+                                    >
+                                      {cleanDesc}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </td>
+
+                              <td className="py-2 px-3 align-middle text-right whitespace-nowrap">
+                                <span className="font-bold text-xs text-slate-900 tabular-nums">
+                                  {formattedAmtStr}
+                                </span>
+                              </td>
+
+                              <td className="py-2 px-3 align-middle">
+                                <div className="w-full max-w-[280px]">
+                                  <CategorySelectCombobox
+                                    categories={categories}
+                                    value={row.category || 'none'}
+                                    onChange={(val) => {
+                                      const updated = [...previewList]
+                                      const chosen = val === 'none' ? undefined : val
+                                      updated[idx].category = chosen
+                                      setPreviewList(updated)
+                                    }}
+                                    triggerClassName="h-7 text-xs bg-white border-slate-200 shadow-2xs"
+                                    placeholder="Selecione categoria"
+                                    searchPlaceholder="Buscar categoria..."
+                                    emptyText="Nenhuma categoria encontrada."
+                                    specialOption={{ id: 'none', label: 'Não Categorizado' }}
+                                    leadingIcon={getCategoryLeadingIcon(row.category)}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </TooltipProvider>
               </div>
 
               {/* Barra de ações em lote abaixo da tabela */}
