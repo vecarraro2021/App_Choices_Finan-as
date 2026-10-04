@@ -1142,7 +1142,60 @@ export function parseNuAccountStatement(
           continue
         }
 
-        // Se é agência/conta subsequente, apenas anexamos aos rawLines para auditoria, sem poluir a descrição principal
+        // Se a descrição acumulada é apenas um tipo genérico (ex: "Compra no débito", "Transferência enviada pelo Pix"),
+        // e a linha seguinte traz o nome do estabelecimento/pessoa (sem ser metadado bancário como agência/conta/banco/CNPJ),
+        // anexamos à descrição da transação ativa para não perder "NETFLIX.COM", nomes de recebedores, etc.
+        const currentAccumDesc = activeTx.descriptionParts
+          .join(' ')
+          .replace(/^[|*\s]+|[|*\s]+$/g, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+
+        const isPureGenericType =
+          /^(compra no debito|transferencia enviada pelo pix|transferencia recebida pelo pix|pagamento de fatura|pagamento de boleto(?: efetuado)?|debito em conta|estorno|reembolso|deposito)$/i.test(
+            currentAccumDesc,
+          )
+
+        // Verifica se a linha é estritamente metadado bancário (agência/conta/sequência de conta/CNPJ) sem nome de recebedor
+        // Exemplos que NÃO devem ir para a descrição:
+        // "Agência: 1 Conta: 176842853-0"
+        // "PAGAMENTOS - IP (0260) Agência: 1 Conta:"
+        // "67278091-1" ou "76223058-4"
+        // "BANCO BTG PACTUAL S.A. (0208) Agência: 30 Conta: 571873-6"
+        // "067.514-•• - BCO SANTANDER (BRASIL) S.A. (0033) Agência: 4667 Conta: 1028459-8"
+        // "•••.949.873-••" isolado
+        const isStrictBankMetadataOnly =
+          /^(?:ag[eê]ncia[:\s]|conta[:\s]|ag[eê]ncia\s+\d|\(0\d{3}\)|\d{7,9}-\d|•••\.\d{3}\.\d{3}-••|\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|pagamentos\s*-\s*ip|[|*\s]*\d{7,9}-\d[|*\s]*$)/i.test(
+            rawLine.replace(/^[|*\s]+|[|*\s]+$/g, '').trim(),
+          ) ||
+          /^(?:banco|bco|pagamentos\s*-\s*ip|coop|nu\s+pagamentos).*ag[eê]ncia/i.test(
+            rawLine.replace(/^[|*\s]+|[|*\s]+$/g, '').trim(),
+          )
+
+        if (isPureGenericType && !isStrictBankMetadataOnly) {
+          // Extrai o nome do recebedor/estabelecimento da linha, limpando metadados se houver delimitador
+          // Ex: "Mirosmar de Sousa Xavier - •••.949.873-•• - NU" -> "Mirosmar de Sousa Xavier"
+          // Ex: "THAYANE GABRYELE GALVAO GUERRA - •••." -> "THAYANE GABRYELE GALVAO GUERRA"
+          // Ex: "NETFLIX.COM" -> "NETFLIX.COM"
+          let textToAdd = rawLine.replace(/^[|*\s]+|[|*\s]+$/g, '').trim()
+          const dashIdx = textToAdd.search(/\s+-\s+(?:•••|\d{2}\.\d{3}\.\d{3}|nu\b|bco\b|ip\b)/i)
+          if (dashIdx !== -1) {
+            textToAdd = textToAdd.slice(0, dashIdx).trim()
+          } else if (textToAdd.includes(' - •••')) {
+            textToAdd = textToAdd.split(' - •••')[0].trim()
+          }
+
+          if (textToAdd.length > 0) {
+            activeTx.descriptionParts.push(textToAdd)
+          }
+          activeTx.rawLines.push(rawLine)
+          continue
+        }
+
+        // Se é agência/conta subsequente ou metadado, apenas anexamos aos rawLines para auditoria, sem poluir a descrição principal
         activeTx.rawLines.push(rawLine)
         continue
       }

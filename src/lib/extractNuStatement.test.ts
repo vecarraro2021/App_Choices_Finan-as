@@ -194,6 +194,31 @@ describe('extractNuStatement - Parser do Extrato Nu real', () => {
       (tx) => tx.description.includes('PJBANK') && tx.amount === 623.63,
     )
     expect(boleto).toBeDefined()
+
+    // 6. Testes de regressão: estabelecimento em linha seguinte após tabela de 2 colunas
+    // Caso 1: Compra no débito NETFLIX.COM 20,90 (15 SET 2026)
+    const netflixTx = result.transactions.find(
+      (tx) => tx.date === '2026-09-15' && tx.amount === 20.9,
+    )
+    expect(netflixTx).toBeDefined()
+    expect(netflixTx?.description.toUpperCase()).toContain('NETFLIX')
+    expect(netflixTx?.type).toBe('debit')
+
+    // Caso 2: Pix enviado para Mirosmar de Sousa Xavier 60,00 (10 SET 2026)
+    const mirosmarTx = result.transactions.find(
+      (tx) => tx.date === '2026-09-10' && tx.amount === 60.0,
+    )
+    expect(mirosmarTx).toBeDefined()
+    expect(mirosmarTx?.description).toContain('Mirosmar de Sousa Xavier')
+    expect(mirosmarTx?.type).toBe('debit')
+
+    // Caso 3: Pix recebido de THAYANE GABRYELE GALVAO GUERRA 250,00 (28 SET 2026)
+    const thayaneTx = result.transactions.find(
+      (tx) => tx.date === '2026-09-28' && tx.amount === 250.0,
+    )
+    expect(thayaneTx).toBeDefined()
+    expect(thayaneTx?.description).toContain('THAYANE GABRYELE GALVAO GUERRA')
+    expect(thayaneTx?.type).toBe('credit')
   })
 
   it('categoriza TODOS os lançamentos de entrada do extrato Nu como "Entradas Pontuais & Variáveis no Período"', async () => {
