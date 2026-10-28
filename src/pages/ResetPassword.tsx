@@ -57,11 +57,21 @@ export default function ResetPassword() {
       }
     }
 
-    // 3. Checagem em pathname no formato /redefinir-senha/:token
+    // 3. Checagem em pathname no formato /redefinir-senha/:token ou /auth/confirm-password-reset/:token
     if (!foundToken) {
       const pathParts = location.pathname.split('/').filter(Boolean)
-      if (pathParts.length >= 2 && pathParts[0] === 'redefinir-senha' && pathParts[1] !== '') {
+      const lastSegment = pathParts[pathParts.length - 1]
+
+      if (location.pathname.includes('/confirm-password-reset/') && lastSegment) {
+        foundToken = lastSegment
+      } else if (
+        pathParts.length >= 2 &&
+        pathParts[0] === 'redefinir-senha' &&
+        pathParts[1] !== ''
+      ) {
         foundToken = pathParts[1]
+      } else if (location.pathname.includes('/redefinir-senha/') && lastSegment) {
+        foundToken = lastSegment
       }
     }
 

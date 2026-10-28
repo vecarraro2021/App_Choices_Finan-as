@@ -67,8 +67,11 @@ const App = () => (
           <Route path="/cadastro" element={<Register />} />
           <Route path="/redefinir-senha" element={<ResetPassword />} />
           <Route path="/redefinir-senha/:token" element={<ResetPassword />} />
-          {/* Rotas de compatibilidade com link padrão do PocketBase caso redirecionado */}
+          {/* Rotas de compatibilidade com link padrão do PocketBase e variações */}
           <Route path="/auth/confirm-password-reset/:token" element={<ResetPassword />} />
+          <Route path="/auth/confirm-password-reset" element={<ResetPassword />} />
+          <Route path="/_/#/auth/confirm-password-reset/:token" element={<ResetPassword />} />
+          <Route path="/_/*" element={<ResetPassword />} />
           <Route path="/onboarding" element={<OnboardingView />} />
 
           {/* Protected App Routes under shared Layout */}
