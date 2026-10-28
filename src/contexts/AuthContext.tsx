@@ -15,6 +15,12 @@ interface AuthContextType {
     pass: string,
     diagnosticAnswers?: Record<number | string, number>,
   ) => Promise<AuthModel>
+  requestPasswordReset: (email: string) => Promise<{ error: any }>
+  confirmPasswordReset: (
+    token: string,
+    password: string,
+    passwordConfirm?: string,
+  ) => Promise<{ error: any }>
   updateProfile: (data: { name?: string }) => Promise<void>
   changePassword: (
     oldPassword: string,
@@ -267,6 +273,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updated)
   }
 
+  const requestPasswordReset = async (email: string) => {
+    try {
+      await pb.collection('users').requestPasswordReset(email)
+      return { error: null }
+    } catch (error) {
+      return { error }
+    }
+  }
+
+  const confirmPasswordReset = async (
+    token: string,
+    password: string,
+    passwordConfirm?: string,
+  ) => {
+    try {
+      await pb
+        .collection('users')
+        .confirmPasswordReset(token, password, passwordConfirm || password)
+      return { error: null }
+    } catch (error) {
+      return { error }
+    }
+  }
+
   const logout = () => {
     pb.authStore.clear()
     setUser(null)
@@ -281,6 +311,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrency,
         login,
         register,
+        requestPasswordReset,
+        confirmPasswordReset,
         updateProfile,
         changePassword,
         logout,

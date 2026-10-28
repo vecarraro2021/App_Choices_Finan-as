@@ -6,6 +6,7 @@ import Layout from '@/components/Layout'
 import Index from '@/pages/Index'
 import Login from '@/pages/Login'
 import Register from '@/pages/Register'
+import ResetPassword from '@/pages/ResetPassword'
 import OnboardingView from '@/pages/Onboarding'
 import DiagnosticPage from '@/pages/Diagnostic'
 import TransactionsView from '@/pages/Transactions'
@@ -64,6 +65,10 @@ const App = () => (
           {/* Public Auth Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Register />} />
+          <Route path="/redefinir-senha" element={<ResetPassword />} />
+          <Route path="/redefinir-senha/:token" element={<ResetPassword />} />
+          {/* Rotas de compatibilidade com link padrão do PocketBase caso redirecionado */}
+          <Route path="/auth/confirm-password-reset/:token" element={<ResetPassword />} />
           <Route path="/onboarding" element={<OnboardingView />} />
 
           {/* Protected App Routes under shared Layout */}

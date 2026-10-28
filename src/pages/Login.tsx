@@ -4,14 +4,16 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   TrendingUp,
   ArrowRight,
+  ArrowLeft,
   Lock,
   Mail,
   Eye,
   EyeOff,
   ShieldCheck,
   Check,
+  CheckCircle2,
   AlertCircle,
-  HelpCircle,
+  KeyRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +29,15 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const { login } = useAuth()
+
+  // Estados do modo "Esqueci minha senha"
+  const [mode, setMode] = useState<'login' | 'forgot'>('login')
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotSuccess, setForgotSuccess] = useState(false)
+  const [forgotError, setForgotError] = useState<string | null>(null)
+
+  const { login, requestPasswordReset } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,6 +54,53 @@ export default function Login() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setForgotError(null)
+
+    const cleanEmail = forgotEmail.trim()
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setForgotError('Por favor, informe um endereço de e-mail válido.')
+      return
+    }
+
+    setForgotLoading(true)
+    try {
+      const { error: resetErr } = await requestPasswordReset(cleanEmail)
+      if (resetErr) {
+        // Verificar se é erro de rede
+        if (
+          resetErr.status === 0 ||
+          resetErr.message?.includes('Network') ||
+          resetErr.name === 'ClientResponseError 0'
+        ) {
+          setForgotError('Falha de conexão. Verifique sua internet e tente novamente.')
+          return
+        }
+      }
+      // Sempre exibe mensagem de sucesso amigável (não revela se o e-mail existe ou não)
+      setForgotSuccess(true)
+    } catch {
+      setForgotError('Não foi possível processar a solicitação. Tente novamente mais tarde.')
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
+  const switchToForgot = () => {
+    setError(null)
+    setForgotError(null)
+    setForgotSuccess(false)
+    if (email) setForgotEmail(email)
+    setMode('forgot')
+  }
+
+  const switchToLogin = () => {
+    setForgotError(null)
+    setForgotSuccess(false)
+    setMode('login')
   }
 
   return (
@@ -64,129 +121,223 @@ export default function Login() {
 
           {/* Form Content */}
           <div className="w-full max-w-md mx-auto my-auto py-8">
-            <div className="mb-8">
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-2">
-                Entrar na sua conta
-              </h1>
-              <p className="text-sm font-medium text-slate-500">
-                Gestão financeira simples e inteligente
-              </p>
-            </div>
-
-            {error && (
-              <div className="mb-5 flex items-center gap-2.5 rounded-xl bg-red-50 p-3.5 text-xs font-semibold text-red-700 border border-red-200 animate-fade-in">
-                <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email */}
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-xs font-semibold text-slate-700">
-                  E-mail
-                </Label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="voce@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 h-11 rounded-xl bg-slate-50/80 border-slate-200 text-sm focus-visible:bg-white focus-visible:ring-blue-600"
-                    required
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-semibold text-slate-700">
-                  Senha
-                </Label>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Digite sua senha"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 h-11 rounded-xl bg-slate-50/80 border-slate-200 text-sm focus-visible:bg-white focus-visible:ring-blue-600"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
-                    title={showPassword ? 'Ocultar senha' : 'Exibir senha'}
-                    aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Remember me & Forgot password */}
-              <div className="flex items-center justify-between pt-1">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="remember"
-                    checked={rememberMe}
-                    onCheckedChange={(checked) => setRememberMe(!!checked)}
-                    className="rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                  />
-                  <label
-                    htmlFor="remember"
-                    className="text-xs font-medium text-slate-600 cursor-pointer select-none"
-                  >
-                    Lembrar de mim
-                  </label>
+            {mode === 'login' ? (
+              <>
+                <div className="mb-8">
+                  <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-2">
+                    Entrar na sua conta
+                  </h1>
+                  <p className="text-sm font-medium text-slate-500">
+                    Gestão financeira simples e inteligente
+                  </p>
                 </div>
 
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                {error && (
+                  <div className="mb-5 flex items-center gap-2.5 rounded-xl bg-red-50 p-3.5 text-xs font-semibold text-red-700 border border-red-200 animate-fade-in">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-5">
+                  {/* Email */}
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="text-xs font-semibold text-slate-700">
+                      E-mail
+                    </Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="voce@email.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="pl-10 h-11 rounded-xl bg-slate-50/80 border-slate-200 text-sm focus-visible:bg-white focus-visible:ring-blue-600"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password */}
+                  <div className="space-y-2">
+                    <Label htmlFor="password" className="text-xs font-semibold text-slate-700">
+                      Senha
+                    </Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                      <Input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Digite sua senha"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="pl-10 pr-10 h-11 rounded-xl bg-slate-50/80 border-slate-200 text-sm focus-visible:bg-white focus-visible:ring-blue-600"
+                        required
+                      />
                       <button
                         type="button"
-                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                        title={showPassword ? 'Ocultar senha' : 'Exibir senha'}
+                        aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
                       >
-                        Esqueci minha senha
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs max-w-xs">
-                      Para redefinir sua senha, entre em contato com o suporte ou administrador do
-                      sistema.
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
+                    </div>
+                  </div>
 
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2"
-                disabled={loading}
-              >
-                {loading ? 'Entrando...' : 'Entrar'}
-                <ArrowRight className="h-4 w-4 stroke-[2.5]" />
-              </Button>
+                  {/* Remember me & Forgot password link */}
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="remember"
+                        checked={rememberMe}
+                        onCheckedChange={(checked) => setRememberMe(!!checked)}
+                        className="rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                      />
+                      <label
+                        htmlFor="remember"
+                        className="text-xs font-medium text-slate-600 cursor-pointer select-none"
+                      >
+                        Lembrar de mim
+                      </label>
+                    </div>
 
-              {/* Sign up link */}
-              <div className="text-center text-xs text-slate-500 pt-2">
-                Ainda não tem conta?{' '}
-                <Link
-                  to="/cadastro"
-                  className="font-bold text-blue-600 hover:text-blue-700 underline underline-offset-2 ml-1"
-                >
-                  Criar conta
-                </Link>
+                    <button
+                      type="button"
+                      onClick={switchToForgot}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                    >
+                      Esqueci minha senha
+                    </button>
+                  </div>
+
+                  {/* Submit Button */}
+                  <Button
+                    type="submit"
+                    className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2"
+                    disabled={loading}
+                  >
+                    {loading ? 'Entrando...' : 'Entrar'}
+                    <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                  </Button>
+
+                  {/* Sign up link */}
+                  <div className="text-center text-xs text-slate-500 pt-2">
+                    Ainda não tem conta?{' '}
+                    <Link
+                      to="/cadastro"
+                      className="font-bold text-blue-600 hover:text-blue-700 underline underline-offset-2 ml-1"
+                    >
+                      Criar conta
+                    </Link>
+                  </div>
+                </form>
+              </>
+            ) : (
+              /* Forgot password form */
+              <div className="animate-fade-in">
+                <div className="mb-6">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 mb-4">
+                    <KeyRound className="h-6 w-6" />
+                  </div>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 mb-2">
+                    Recuperar senha
+                  </h1>
+                  <p className="text-sm font-medium text-slate-500">
+                    Digite seu e-mail cadastrado e enviaremos um link com instruções para redefinir
+                    sua senha.
+                  </p>
+                </div>
+
+                {forgotSuccess ? (
+                  <div className="space-y-6">
+                    <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 sm:p-5">
+                      <div className="flex items-start gap-3">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+                        <div className="space-y-1 text-left">
+                          <p className="text-sm font-bold text-emerald-900">
+                            Solicitação enviada com sucesso!
+                          </p>
+                          <p className="text-xs text-emerald-700 leading-relaxed">
+                            Se este email estiver cadastrado, você receberá um link de recuperação
+                            em instantes. Verifique também sua caixa de spam ou lixo eletrônico.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={switchToLogin}
+                      className="w-full h-11 rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-sm flex items-center justify-center gap-2"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Voltar para o login
+                    </Button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleForgotPasswordSubmit} className="space-y-5">
+                    {forgotError && (
+                      <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3.5 text-xs font-semibold text-red-700 border border-red-200 animate-fade-in">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                        <span>{forgotError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="forgot-email"
+                        className="text-xs font-semibold text-slate-700"
+                      >
+                        E-mail cadastrado
+                      </Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <Input
+                          id="forgot-email"
+                          type="email"
+                          placeholder="voce@email.com"
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          className="pl-10 h-11 rounded-xl bg-slate-50/80 border-slate-200 text-sm focus-visible:bg-white focus-visible:ring-blue-600"
+                          required
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2"
+                      disabled={forgotLoading}
+                    >
+                      {forgotLoading ? 'Enviando link...' : 'Enviar link de recuperação'}
+                      <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                    </Button>
+
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={switchToLogin}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        Lembrou sua senha? Voltar ao login
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
-            </form>
+            )}
           </div>
-
           {/* Bottom Security / Help Footer */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-4 border-t border-slate-100 text-[11px] text-slate-400">
             <div className="flex items-center gap-1.5">
