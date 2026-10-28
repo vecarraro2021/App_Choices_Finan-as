@@ -27,6 +27,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -53,6 +61,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
@@ -87,6 +96,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   const handleLogout = () => {
+    setShowLogoutConfirm(false)
     logout()
     navigate('/login')
   }
@@ -220,7 +230,7 @@ export default function Layout({ children }: LayoutProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={handleLogout}
+                      onClick={() => setShowLogoutConfirm(true)}
                       aria-label="Sair"
                       className="text-slate-400 hover:text-red-600 hover:bg-red-50 h-8 w-8"
                     >
@@ -248,7 +258,7 @@ export default function Layout({ children }: LayoutProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={handleLogout}
+                  onClick={() => setShowLogoutConfirm(true)}
                   title="Sair"
                   className="text-slate-400 hover:text-red-600 hover:bg-red-50 h-8 w-8 shrink-0"
                 >
@@ -359,7 +369,7 @@ export default function Layout({ children }: LayoutProps) {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={handleLogout}
+                  onClick={() => setShowLogoutConfirm(true)}
                   className="text-red-600 cursor-pointer focus:text-red-600 focus:bg-red-50"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
@@ -451,6 +461,24 @@ export default function Layout({ children }: LayoutProps) {
           )
         })}
       </nav>
+
+      {/* Modal de Confirmação de Logout */}
+      <Dialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sair do sistema</DialogTitle>
+            <DialogDescription>Tem certeza de que deseja encerrar sua sessão?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <Button type="button" variant="outline" onClick={() => setShowLogoutConfirm(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleLogout}>
+              Sair
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
