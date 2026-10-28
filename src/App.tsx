@@ -7,7 +7,6 @@ import Index from '@/pages/Index'
 import Login from '@/pages/Login'
 import Register from '@/pages/Register'
 import ResetPassword from '@/pages/ResetPassword'
-import OnboardingView from '@/pages/Onboarding'
 import DiagnosticPage from '@/pages/Diagnostic'
 import TransactionsView from '@/pages/Transactions'
 import IncomeView from '@/pages/Income'
@@ -24,7 +23,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 // Componente de Roteamento para a rota raiz `/`:
 // Usuário autenticado -> Dashboard (Index sob Layout)
-// Usuário NÃO autenticado -> Onboarding com Bússola Financeira
+// Usuário NÃO autenticado -> Redirecionamento para /login (sem diagnóstico pré-login)
 function RootRoute() {
   const { user, loading } = useAuth()
 
@@ -49,7 +48,7 @@ function RootRoute() {
     )
   }
 
-  return <OnboardingView />
+  return <Navigate to="/login" replace />
 }
 
 const App = () => (
@@ -59,7 +58,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <Routes>
-          {/* Rota raiz condicional: Onboarding para não autenticados, Dashboard para autenticados */}
+          {/* Rota raiz: Dashboard para autenticados, redireciona para /login quando deslogado */}
           <Route path="/" element={<RootRoute />} />
 
           {/* Public Auth Routes */}
@@ -72,7 +71,7 @@ const App = () => (
           <Route path="/auth/confirm-password-reset" element={<ResetPassword />} />
           <Route path="/_/#/auth/confirm-password-reset/:token" element={<ResetPassword />} />
           <Route path="/_/*" element={<ResetPassword />} />
-          <Route path="/onboarding" element={<OnboardingView />} />
+          <Route path="/onboarding" element={<Navigate to="/login" replace />} />
 
           {/* Protected App Routes under shared Layout */}
           <Route
