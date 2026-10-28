@@ -14,11 +14,16 @@ import { Label } from '@/components/ui/label'
 import { MONTH_NAMES_SHORT } from '@/lib/formatters'
 
 export interface PeriodFilterPopoverProps {
-  startMonth: string
-  endMonth: string
+  // Novo modelo: seleção de mês único
+  selectedMonth?: string
+  onMonthChange?: (val: string) => void
+  // Compatibilidade retroativa caso chamado com startMonth/endMonth
+  startMonth?: string
+  endMonth?: string
+  onStartMonthChange?: (val: string) => void
+  onEndMonthChange?: (val: string) => void
+
   isFullYear: boolean
-  onStartMonthChange: (val: string) => void
-  onEndMonthChange: (val: string) => void
   onFullYearChange: (val: boolean) => void
   availableMonths: string[]
   isOpen?: boolean
@@ -37,11 +42,13 @@ export function formatPeriodMonthLabel(mStr: string): string {
 }
 
 export function PeriodFilterPopover({
+  selectedMonth: directSelectedMonth,
+  onMonthChange,
   startMonth,
   endMonth,
-  isFullYear,
   onStartMonthChange,
   onEndMonthChange,
+  isFullYear,
   onFullYearChange,
   availableMonths,
   isOpen,
@@ -53,18 +60,28 @@ export function PeriodFilterPopover({
   const open = isOpen !== undefined ? isOpen : internalOpen
   const setOpen = onOpenChange !== undefined ? onOpenChange : setInternalOpen
 
+  // Determinar o mês selecionado corrente (suporta tanto directSelectedMonth quanto startMonth/endMonth)
+  const activeMonth = directSelectedMonth || startMonth || endMonth || '2026-08'
+
+  const handleSelectMonth = (val: string) => {
+    if (onMonthChange) {
+      onMonthChange(val)
+    }
+    if (onStartMonthChange) {
+      onStartMonthChange(val)
+    }
+    if (onEndMonthChange) {
+      onEndMonthChange(val)
+    }
+  }
+
   const filterLabel = useMemo(() => {
     if (isFullYear) {
-      const year = startMonth ? startMonth.split('-')[0] : '2026'
+      const year = activeMonth ? activeMonth.split('-')[0] : '2026'
       return `Ano ${year} Completo`
     }
-    if (startMonth === endMonth) {
-      return formatPeriodMonthLabel(startMonth)
-    }
-    const s = startMonth <= endMonth ? startMonth : endMonth
-    const e = startMonth <= endMonth ? endMonth : startMonth
-    return `${formatPeriodMonthLabel(s)} - ${formatPeriodMonthLabel(e)}`
-  }, [isFullYear, startMonth, endMonth])
+    return formatPeriodMonthLabel(activeMonth)
+  }, [isFullYear, activeMonth])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -81,89 +98,42 @@ export function PeriodFilterPopover({
           <ChevronDown className="h-4 w-4 text-slate-400" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-4 bg-white border-slate-200 shadow-lg">
+      <PopoverContent align="end" className="w-72 p-4 bg-white border-slate-200 shadow-lg">
         <div className="space-y-4">
           <div className="space-y-1">
             <h4 className="font-semibold text-sm text-slate-900">Filtrar Período</h4>
-            <p className="text-xs text-slate-500">
-              Selecione o mês inicial e o mês final para recalcular os dados.
-            </p>
+            <p className="text-xs text-slate-500">Selecione o mês para recalcular os dados.</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="select-start-month"
-                className={`text-xs font-semibold transition-colors ${
-                  isFullYear ? 'text-slate-400' : 'text-slate-600'
+          <div className="space-y-1.5">
+            <label
+              htmlFor="select-single-month"
+              className={`text-xs font-semibold transition-colors ${
+                isFullYear ? 'text-slate-400' : 'text-slate-600'
+              }`}
+            >
+              Mês de referência
+            </label>
+            <Select value={activeMonth} disabled={isFullYear} onValueChange={handleSelectMonth}>
+              <SelectTrigger
+                id="select-single-month"
+                disabled={isFullYear}
+                className={`w-full text-xs h-9 border-slate-200 transition-opacity ${
+                  isFullYear
+                    ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60'
+                    : 'bg-slate-50 text-slate-800'
                 }`}
               >
-                Início
-              </label>
-              <Select
-                value={startMonth}
-                disabled={isFullYear}
-                onValueChange={(val) => {
-                  onStartMonthChange(val)
-                }}
-              >
-                <SelectTrigger
-                  id="select-start-month"
-                  disabled={isFullYear}
-                  className={`w-full text-xs h-9 border-slate-200 transition-opacity ${
-                    isFullYear
-                      ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60'
-                      : 'bg-slate-50 text-slate-800'
-                  }`}
-                >
-                  <SelectValue placeholder="Mês inicial" />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  {availableMonths.map((m) => (
-                    <SelectItem key={`start-${m}`} value={m} className="text-xs">
-                      {formatPeriodMonthLabel(m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="select-end-month"
-                className={`text-xs font-semibold transition-colors ${
-                  isFullYear ? 'text-slate-400' : 'text-slate-600'
-                }`}
-              >
-                Fim
-              </label>
-              <Select
-                value={endMonth}
-                disabled={isFullYear}
-                onValueChange={(val) => {
-                  onEndMonthChange(val)
-                }}
-              >
-                <SelectTrigger
-                  id="select-end-month"
-                  disabled={isFullYear}
-                  className={`w-full text-xs h-9 border-slate-200 transition-opacity ${
-                    isFullYear
-                      ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60'
-                      : 'bg-slate-50 text-slate-800'
-                  }`}
-                >
-                  <SelectValue placeholder="Mês final" />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  {availableMonths.map((m) => (
-                    <SelectItem key={`end-${m}`} value={m} className="text-xs">
-                      {formatPeriodMonthLabel(m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                <SelectValue placeholder="Selecione o mês" />
+              </SelectTrigger>
+              <SelectContent className="max-h-56">
+                {availableMonths.map((m) => (
+                  <SelectItem key={`month-${m}`} value={m} className="text-xs">
+                    {formatPeriodMonthLabel(m)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Toggle Ano Completo */}

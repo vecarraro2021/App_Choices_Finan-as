@@ -44,9 +44,8 @@ export default function AlertsView() {
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
   const [latestDiagnostic, setLatestDiagnostic] = useState<DiagnosticRecord | null>(null)
 
-  // Period Filter State (Same pattern as Dashboard & Receitas)
-  const [startMonth, setStartMonth] = useState<string>('2026-08')
-  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  // Period / Month Filter State (Mês único + Ano Completo)
+  const [selectedMonth, setSelectedMonth] = useState<string>('2026-08')
   const [isFullYear, setIsFullYear] = useState<boolean>(false)
   const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
@@ -128,8 +127,7 @@ export default function AlertsView() {
       } else if (availableMonths.length > 0) {
         latestMonth = availableMonths[availableMonths.length - 1]
       }
-      setStartMonth(latestMonth)
-      setEndMonth(latestMonth)
+      setSelectedMonth(latestMonth)
       setHasInitializedDefaultMonth(true)
     }
   }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
@@ -137,12 +135,11 @@ export default function AlertsView() {
   // Compute filtered transactions and intervalMonths based on selected period
   const filteredData = useMemo(() => {
     if (isFullYear) {
-      const refYear =
-        monthsWithData.length > 0
+      const refYear = selectedMonth
+        ? selectedMonth.split('-')[0]
+        : monthsWithData.length > 0
           ? monthsWithData[0].split('-')[0]
-          : startMonth
-            ? startMonth.split('-')[0]
-            : '2026'
+          : '2026'
 
       const startOfYear = `${refYear}-01`
       const endOfYear = `${refYear}-12`
@@ -173,41 +170,29 @@ export default function AlertsView() {
       }
     }
 
-    const s = startMonth <= endMonth ? startMonth : endMonth
-    const e = startMonth <= endMonth ? endMonth : startMonth
+    const s = selectedMonth || '2026-08'
+    const e = selectedMonth || '2026-08'
 
     const txs = transactions.filter((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
       if (!m) return false
-      return m >= s && m <= e
+      return m === s
     })
 
     const incs = incomes.filter((inc) => {
       const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
       if (!m) return false
-      return m >= s && m <= e
+      return m === s
     })
-
-    const intervalMonths: string[] = []
-    let curr = s
-    while (curr <= e) {
-      intervalMonths.push(curr)
-      const [y, m] = curr.split('-').map(Number)
-      if (m === 12) {
-        curr = `${y + 1}-01`
-      } else {
-        curr = `${y}-${String(m + 1).padStart(2, '0')}`
-      }
-    }
 
     return {
       txs,
       incs,
-      intervalMonths,
+      intervalMonths: [s],
       effectiveStart: s,
       effectiveEnd: e,
     }
-  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
+  }, [isFullYear, transactions, incomes, monthsWithData, selectedMonth])
 
   // Calculate monthly average spending for the period
   const periodMonthlyAverage = useMemo(() => {
@@ -381,11 +366,9 @@ export default function AlertsView() {
 
         <div className="flex items-center gap-3">
           <PeriodFilterPopover
-            startMonth={startMonth}
-            endMonth={endMonth}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
             isFullYear={isFullYear}
-            onStartMonthChange={setStartMonth}
-            onEndMonthChange={setEndMonth}
             onFullYearChange={setIsFullYear}
             availableMonths={availableMonths}
             isOpen={isFilterOpen}
@@ -513,9 +496,7 @@ export default function AlertsView() {
                 <CardDescription className="text-xs text-slate-500 mt-0.5">
                   {isFullYear
                     ? 'Sugestões consolidadas calculadas sobre todo o ano selecionado.'
-                    : filteredData.effectiveStart === filteredData.effectiveEnd
-                      ? `Sugestões calculadas exclusivamente para ${formatPeriodMonthLabel(filteredData.effectiveStart)}.`
-                      : `Sugestões calculadas para o intervalo de ${formatPeriodMonthLabel(filteredData.effectiveStart)} até ${formatPeriodMonthLabel(filteredData.effectiveEnd)}.`}
+                    : `Sugestões calculadas exclusivamente para ${formatPeriodMonthLabel(filteredData.effectiveStart)}.`}
                 </CardDescription>
               </div>
               <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">

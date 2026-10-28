@@ -68,9 +68,8 @@ export default function IncomeView() {
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Period Filter State
-  const [startMonth, setStartMonth] = useState<string>('2026-08')
-  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  // Period / Month Filter State (Mês único + Ano Completo)
+  const [selectedMonth, setSelectedMonth] = useState<string>('2026-08')
   const [isFullYear, setIsFullYear] = useState<boolean>(false)
   const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
@@ -167,8 +166,7 @@ export default function IncomeView() {
       } else if (availableMonths.length > 0) {
         latestMonth = availableMonths[availableMonths.length - 1]
       }
-      setStartMonth(latestMonth)
-      setEndMonth(latestMonth)
+      setSelectedMonth(latestMonth)
       setHasInitializedDefaultMonth(true)
     }
   }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
@@ -219,19 +217,18 @@ export default function IncomeView() {
     return false
   }
 
-  // Filtered transactions & incomes based on startMonth, endMonth, and isFullYear
+  // Filtered transactions & incomes based on selectedMonth and isFullYear
   const filteredData = useMemo(() => {
     let s: string
     let e: string
     let intervalMonths: string[] = []
 
     if (isFullYear) {
-      const refYear =
-        monthsWithData.length > 0
+      const refYear = selectedMonth
+        ? selectedMonth.split('-')[0]
+        : monthsWithData.length > 0
           ? monthsWithData[0].split('-')[0]
-          : startMonth
-            ? startMonth.split('-')[0]
-            : '2026'
+          : '2026'
 
       s = `${refYear}-01`
       e = `${refYear}-12`
@@ -239,18 +236,9 @@ export default function IncomeView() {
         intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
       }
     } else {
-      s = startMonth <= endMonth ? startMonth : endMonth
-      e = startMonth <= endMonth ? endMonth : startMonth
-      let curr = s
-      while (curr <= e) {
-        intervalMonths.push(curr)
-        const [y, m] = curr.split('-').map(Number)
-        if (m === 12) {
-          curr = `${y + 1}-01`
-        } else {
-          curr = `${y}-${String(m + 1).padStart(2, '0')}`
-        }
-      }
+      s = selectedMonth || '2026-08'
+      e = selectedMonth || '2026-08'
+      intervalMonths = [s]
     }
 
     // Transações no intervalo
@@ -315,8 +303,7 @@ export default function IncomeView() {
     transactions,
     incomes,
     monthsWithData,
-    startMonth,
-    endMonth,
+    selectedMonth,
     exchangeRates,
     punctualIncomeCategoryIds,
   ])
@@ -633,11 +620,9 @@ export default function IncomeView() {
 
         <div className="flex items-center gap-3">
           <PeriodFilterPopover
-            startMonth={startMonth}
-            endMonth={endMonth}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
             isFullYear={isFullYear}
-            onStartMonthChange={setStartMonth}
-            onEndMonthChange={setEndMonth}
             onFullYearChange={setIsFullYear}
             availableMonths={availableMonths}
             isOpen={isFilterOpen}
@@ -867,8 +852,8 @@ export default function IncomeView() {
             <CardDescription className="text-xs">
               Lançamentos específicos filtrados pelo período selecionado (
               {isFullYear
-                ? 'Ano completo'
-                : `${formatPeriodMonthLabel(filteredData.effectiveStart)} até ${formatPeriodMonthLabel(filteredData.effectiveEnd)}`}
+                ? `Ano ${filteredData.effectiveStart.split('-')[0]} completo`
+                : formatPeriodMonthLabel(filteredData.effectiveStart)}
               )
             </CardDescription>
           </div>

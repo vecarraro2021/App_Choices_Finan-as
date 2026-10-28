@@ -85,9 +85,8 @@ export default function Index() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [latestDiagnostic, setLatestDiagnostic] = useState<DiagnosticRecord | null>(null)
 
-  // Date Filter State
-  const [startMonth, setStartMonth] = useState<string>('2026-08')
-  const [endMonth, setEndMonth] = useState<string>('2026-08')
+  // Date / Month Filter State (Mês único + Ano Completo)
+  const [selectedMonth, setSelectedMonth] = useState<string>('2026-08')
   const [isFullYear, setIsFullYear] = useState<boolean>(false)
   const [hasInitializedDefaultMonth, setHasInitializedDefaultMonth] = useState<boolean>(false)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
@@ -190,29 +189,23 @@ export default function Index() {
       } else if (availableMonths.length > 0) {
         latestMonth = availableMonths[availableMonths.length - 1]
       }
-      setStartMonth(latestMonth)
-      setEndMonth(latestMonth)
+      setSelectedMonth(latestMonth)
       setHasInitializedDefaultMonth(true)
     }
   }, [loading, monthsWithData, availableMonths, hasInitializedDefaultMonth])
 
-  // Filtered transactions & incomes based on startMonth, endMonth, and isFullYear
+  // Filtered transactions & incomes based on selectedMonth and isFullYear
   const filteredData = useMemo(() => {
     if (isFullYear) {
-      // Full year: all months with data or entire year interval
-      // Determine the reference year from data or current year (default 2026)
-      const refYear =
-        monthsWithData.length > 0
+      const refYear = selectedMonth
+        ? selectedMonth.split('-')[0]
+        : monthsWithData.length > 0
           ? monthsWithData[0].split('-')[0]
-          : startMonth
-            ? startMonth.split('-')[0]
-            : '2026'
+          : '2026'
 
       const startOfYear = `${refYear}-01`
       const endOfYear = `${refYear}-12`
 
-      // If there are months with data, cover from earliest to latest data month,
-      // or the full 12 months of the year
       const txs = transactions.filter((tx) => {
         const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
         if (!m) return false
@@ -225,9 +218,6 @@ export default function Index() {
         return m.startsWith(refYear) || (m >= startOfYear && m <= endOfYear)
       })
 
-      // Interval months for recurring incomes & calculations:
-      // If there are specific data months in the year, use all months in the year up to the latest or all 12
-      // Using all 12 months for "Ano completo"
       const intervalMonths: string[] = []
       for (let i = 1; i <= 12; i++) {
         intervalMonths.push(`${refYear}-${String(i).padStart(2, '0')}`)
@@ -242,43 +232,29 @@ export default function Index() {
       }
     }
 
-    const s = startMonth <= endMonth ? startMonth : endMonth
-    const e = startMonth <= endMonth ? endMonth : startMonth
+    const s = selectedMonth || '2026-08'
+    const e = selectedMonth || '2026-08'
 
     const txs = transactions.filter((tx) => {
       const m = tx.month || (tx.date ? tx.date.slice(0, 7) : '')
       if (!m) return false
-      return m >= s && m <= e
+      return m === s
     })
 
     const incs = incomes.filter((inc) => {
       const m = inc.month || (inc.date ? inc.date.slice(0, 7) : '')
       if (!m) return false
-      return m >= s && m <= e
+      return m === s
     })
-
-    // Calculate all distinct months that fall within the selected interval [s, e]
-    // Generate consecutive month strings between s and e
-    const intervalMonths: string[] = []
-    let curr = s
-    while (curr <= e) {
-      intervalMonths.push(curr)
-      const [y, m] = curr.split('-').map(Number)
-      if (m === 12) {
-        curr = `${y + 1}-01`
-      } else {
-        curr = `${y}-${String(m + 1).padStart(2, '0')}`
-      }
-    }
 
     return {
       txs,
       incs,
-      intervalMonths,
+      intervalMonths: [s],
       effectiveStart: s,
       effectiveEnd: e,
     }
-  }, [isFullYear, transactions, incomes, monthsWithData, startMonth, endMonth])
+  }, [isFullYear, transactions, incomes, monthsWithData, selectedMonth])
 
   // Total Income (Entrada) for the period: Punctual Incomes + Recurring Incomes * months
   const totalIncome = useMemo(() => {
@@ -540,11 +516,9 @@ export default function Index() {
         {/* Seletor de Período por Data */}
         <div className="flex items-center gap-3">
           <PeriodFilterPopover
-            startMonth={startMonth}
-            endMonth={endMonth}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
             isFullYear={isFullYear}
-            onStartMonthChange={setStartMonth}
-            onEndMonthChange={setEndMonth}
             onFullYearChange={setIsFullYear}
             availableMonths={availableMonths}
             isOpen={isFilterOpen}
