@@ -9,6 +9,7 @@ import {
   AlertCircle,
   Menu,
   X,
+  Paperclip,
   User as UserIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,8 +17,11 @@ import {
   listConsultantConversations,
   listConsultantMessages,
   sendConsultantMessage,
+  uploadConsultantAttachment,
   type AgentConversationItem,
+  type ConsultantAttachment,
 } from '@/services/consultantService'
+import { AttachmentChip } from '@/components/AttachmentChip'
 import type { DisplayMessage } from '@/lib/skipAi'
 
 interface SuggestionChip {
@@ -61,9 +65,40 @@ export default function ConsultantView() {
 
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false)
 
+  const [pendingAttachment, setPendingAttachment] = useState<File | null>(null)
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10 MB
+  const ACCEPTED_ATTACHMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+  const ACCEPTED_EXTENSIONS = '.pdf,.jpg,.jpeg,.png,.webp'
+  const MAX_ATTACHMENTS = 3
+
+  const handleSelectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Permite re-selecionar o mesmo arquivo depois de removido
+    e.target.value = ''
+    if (!file) return
+    if (!ACCEPTED_ATTACHMENT_TYPES.includes(file.type)) {
+      setErrorMsg('Tipo de arquivo não suportado. Envie PDF, JPG, PNG ou WEBP.')
+      return
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setErrorMsg('Arquivo muito grande. O limite é 10 MB.')
+      return
+    }
+    setErrorMsg(null)
+    setPendingAttachment(file)
+  }
+
+  const handleRemoveAttachment = () => {
+    setPendingAttachment(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   // Carregar lista de conversas recentes
   const fetchConversations = async (autoSelectLatest = false) => {
@@ -161,7 +196,7 @@ export default function ConsultantView() {
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend !== undefined ? textToSend : inputMessage
     const text = rawText.trim()
-    if (!text || isStreaming) return
+    if ((!text && !pendingAttachment) || isStreaming) return
 
     if (text.length > 600) {
       setErrorMsg('A mensagem deve ter no máximo 600 caracteres.')
@@ -170,6 +205,27 @@ export default function ConsultantView() {
 
     setErrorMsg(null)
     setInputMessage('')
+    const attachmentToSend = pendingAttachment
+    setPendingAttachment(null)
+
+    // Upload do anexo (se houver) ANTES de enviar a mensagem para o agente
+    let uploadedAttachment: ConsultantAttachment | null = null
+    if (attachmentToSend) {
+      try {
+        setIsUploadingAttachment(true)
+        uploadedAttachment = await uploadConsultantAttachment(
+          attachmentToSend,
+          activeConversationId,
+        )
+      } catch (err: unknown) {
+        const errObj = err as Error
+        setErrorMsg(errObj.message || 'Não foi possível enviar o anexo.')
+        setIsUploadingAttachment(false)
+        setPendingAttachment(attachmentToSend)
+        return
+      }
+      setIsUploadingAttachment(false)
+    }
 
     // Mensagem temporária do usuário
     const userMsgId = 'user-' + Date.now()
@@ -178,6 +234,19 @@ export default function ConsultantView() {
       role: 'user',
       content: text,
       created: new Date().toISOString(),
+      ...(uploadedAttachment
+        ? {
+            attachments: [
+              {
+                id: uploadedAttachment.id,
+                file_name: uploadedAttachment.file_name,
+                mime_type: uploadedAttachment.mime_type,
+                kind: uploadedAttachment.kind,
+                file: uploadedAttachment.file,
+              },
+            ],
+          }
+        : {}),
     }
 
     setMessages((prev) => [...prev, userMsg])
@@ -189,12 +258,16 @@ export default function ConsultantView() {
 
     try {
       const isNewConversation = !activeConversationId
-      const titleCandidate = text.length > 35 ? text.slice(0, 32) + '...' : text
+      const titleCandidate =
+        text.length > 35
+          ? text.slice(0, 32) + '...'
+          : text || uploadedAttachment?.file_name || 'Conversa'
 
       const result = await sendConsultantMessage({
         message: text,
         conversationId: activeConversationId,
         title: isNewConversation ? titleCandidate : undefined,
+        attachmentIds: uploadedAttachment ? [uploadedAttachment.id] : undefined,
         signal: controller.signal,
         handlers: {
           onChunk: (_delta, full) => {
@@ -448,14 +521,32 @@ export default function ConsultantView() {
                       </div>
                     )}
 
-                    <div
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[85%] whitespace-pre-wrap break-words shadow-2xs ${
-                        isUser
-                          ? 'bg-blue-600 text-white rounded-br-xs font-normal'
-                          : 'bg-slate-100/90 text-slate-800 rounded-bl-xs border border-slate-200/60'
-                      }`}
-                    >
-                      {m.content}
+                    <div className="flex flex-col items-end max-w-[85%] gap-1">
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 justify-end">
+                          {m.attachments.map((att) => (
+                            <AttachmentChip
+                              key={att.id}
+                              fileName={att.file_name}
+                              kind={att.kind}
+                              recordId={att.id}
+                              storedName={att.file}
+                              variant="message"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {m.content && (
+                        <div
+                          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-full whitespace-pre-wrap break-words shadow-2xs ${
+                            isUser
+                              ? 'bg-blue-600 text-white rounded-br-xs font-normal'
+                              : 'bg-slate-100/90 text-slate-800 rounded-bl-xs border border-slate-200/60'
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                      )}
                     </div>
 
                     {isUser && (
@@ -524,18 +615,54 @@ export default function ConsultantView() {
                 className="w-full resize-none border-0 bg-transparent p-0 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-0 leading-relaxed pr-24"
               />
 
+              {pendingAttachment && (
+                <div className="flex flex-wrap gap-1.5 pb-2">
+                  <AttachmentChip
+                    fileName={pendingAttachment.name}
+                    kind={
+                      pendingAttachment.type === 'application/pdf'
+                        ? 'pdf'
+                        : pendingAttachment.type.startsWith('image/')
+                          ? 'image'
+                          : 'other'
+                    }
+                    variant="composer"
+                    loading={isUploadingAttachment}
+                    onRemove={handleRemoveAttachment}
+                  />
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100/80 mt-1">
-                <span
-                  className={`text-[11px] font-mono ${
-                    inputMessage.length >= 580 ? 'text-amber-600 font-bold' : 'text-slate-400'
-                  }`}
-                >
-                  {inputMessage.length}/600
-                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ACCEPTED_EXTENSIONS}
+                    className="hidden"
+                    onChange={handleSelectFile}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isStreaming || isUploadingAttachment}
+                    title="Anexar PDF ou imagem"
+                    aria-label="Anexar PDF ou imagem"
+                    className="h-8 w-8 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-40"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                  <span
+                    className={`text-[11px] font-mono ${
+                      inputMessage.length >= 580 ? 'text-amber-600 font-bold' : 'text-slate-400'
+                    }`}
+                  >
+                    {inputMessage.length}/600
+                  </span>
+                </div>
 
                 <Button
                   onClick={() => handleSendMessage()}
-                  disabled={!inputMessage.trim() || isStreaming}
+                  disabled={(!inputMessage.trim() && !pendingAttachment) || isStreaming}
                   size="icon"
                   className="h-9 w-9 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-transform active:scale-95 disabled:opacity-40"
                 >

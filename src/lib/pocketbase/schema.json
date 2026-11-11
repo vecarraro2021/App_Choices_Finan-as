@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-28T03:40:29.672Z",
+  "generatedAt": "2026-11-11T21:49:12.558Z",
   "collections": [
     {
       "name": "users",
@@ -860,6 +860,83 @@
       "indexes": [
         "CREATE INDEX idx_diagnostics_owner ON diagnostics (owner)",
         "CREATE INDEX idx_diagnostics_owner_version ON diagnostics (owner, version DESC)"
+      ]
+    },
+    {
+      "name": "consultor_attachments",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' && owner = @request.auth.id",
+        "view": "@request.auth.id != '' && owner = @request.auth.id",
+        "create": "@request.auth.id != '' && owner = @request.auth.id",
+        "update": "@request.auth.id != '' && owner = @request.auth.id",
+        "delete": "@request.auth.id != '' && owner = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "conversation_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "message_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "file_name",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "mime_type",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["application/pdf", "image/jpeg", "image/png", "image/webp"]
+        },
+        {
+          "name": "kind",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pdf", "image"]
+        },
+        {
+          "name": "file",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_consultor_attachments_owner ON consultor_attachments (owner)",
+        "CREATE INDEX idx_consultor_attachments_conv ON consultor_attachments (conversation_id)",
+        "CREATE INDEX idx_consultor_attachments_message ON consultor_attachments (message_id)"
       ]
     }
   ]

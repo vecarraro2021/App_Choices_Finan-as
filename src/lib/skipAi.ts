@@ -47,6 +47,15 @@ export interface DisplayMessage {
   content: string
   citations?: AgentCitation[]
   created: string
+  /** Anexos (PDF/imagens) associados a esta mensagem do usuário */
+  attachments?: Array<{
+    id: string
+    file_name: string
+    mime_type: string
+    kind: string
+    file: string
+    created?: string
+  }>
 }
 
 export interface OpenAIChatStreamChunk {
