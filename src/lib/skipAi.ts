@@ -46,8 +46,7 @@ export interface DisplayMessage {
   role: 'user' | 'assistant'
   content: string
   citations?: AgentCitation[]
-  created: string
-  /** Anexos (PDF/imagens) associados a esta mensagem do usuário */
+  /** Anexos (PDF/imagens) associados à mensagem do usuário (consultor). */
   attachments?: Array<{
     id: string
     file_name: string
@@ -56,6 +55,7 @@ export interface DisplayMessage {
     file: string
     created?: string
   }>
+  created: string
 }
 
 export interface OpenAIChatStreamChunk {

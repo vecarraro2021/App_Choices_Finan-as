@@ -42,6 +42,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -83,6 +84,7 @@ export default function CategoriesView() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [editName, setEditName] = useState('')
   const [editEstimated, setEditEstimated] = useState('')
+  const [editNote, setEditNote] = useState('')
   const [editColor, setEditColor] = useState('#2563EB')
   const [savingEdit, setSavingEdit] = useState(false)
 
@@ -185,6 +187,7 @@ export default function CategoriesView() {
     setEditingCategory(cat)
     setEditName(cat.name)
     setEditEstimated(cat.estimated ? String(cat.estimated) : '')
+    setEditNote(cat.note || '')
     setEditColor(cat.color || '#2563EB')
   }
 
@@ -200,6 +203,7 @@ export default function CategoriesView() {
       await updateCategory(editingCategory.id, {
         name: editName.trim(),
         estimated: estNum || 0,
+        note: editNote.trim() || undefined,
         color: editingCategory.type === 'main' ? editColor : undefined,
       })
 
@@ -974,6 +978,17 @@ export default function CategoriesView() {
                 />
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="e-cat-note">Nota (opcional)</Label>
+              <Textarea
+                id="e-cat-note"
+                placeholder="Ex: valor inclui condomínio; revisar a cada renovação de contrato."
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value)}
+                rows={3}
+              />
+            </div>
 
             {editingCategory?.type === 'main' && (
               <div className="space-y-1.5">

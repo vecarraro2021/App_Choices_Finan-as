@@ -22,6 +22,7 @@ export interface Category {
   estimated?: number
   color?: string
   icon?: string
+  note?: string
   created?: string
   updated?: string
   expand?: {
